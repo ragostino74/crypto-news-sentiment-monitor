@@ -12,8 +12,8 @@ Il progetto è suddiviso in **moduli indipendenti**, ciascuno completabile e tes
 | `services` | ✅ Pronto | Pulizia, normalizzazione e deduplica degli articoli |
 | `database` | ✅ Pronto | Persistenza articoli e run con SQLAlchemy + SQLite |
 | `sentiment` | ✅ Pronto | Analisi sentiment VADER su headline e summary |
+| `scheduler` | ✅ Pronto | Job periodico per esecuzione automatica pipeline completa |
 | `api` | 🔲 Da fare | Endpoint FastAPI per consumo dati |
-| `scheduler` | 🔲 Da fare | Raccolta periodica degli articoli |
 
 ---
 
@@ -231,6 +231,80 @@ init_db("sqlite:///:memory:")
 
 ---
 
+## Modulo Scheduler
+
+### Cosa fa
+
+- **Job periodico** ogni 300 secondi (configurabile) per eseguire la pipeline completa in automatico
+- Pipeline: fetch → normalizza → deduplica → sentiment → persistenza → finalizza run
+- **Per-source failure isolation**: un fallimento su una fonte non blocca le altre
+- Trigger manuale on-demand per test o esecuzione puntuale
+- Bootstrap integrato in `main.py` con shutdown pulito (SIGINT/SIGTERM)
+
+### Funzioni principali
+
+```python
+from app.services.scheduler import Scheduler, RunResult, get_scheduler, run_pipeline
+
+# Avvia scheduler periodico (in background thread)
+scheduler = Scheduler(interval_seconds=300, db_url="sqlite:///data/crypto_news.db")
+scheduler.start()          # il primo run scatta dopo 300s
+
+# Trigger manuale one-shot
+result: RunResult = scheduler.run_once()
+print(result.status)           # "completed" / "error"
+print(result.total_fetched)    # articoli grezzi totali
+print(result.total_clean)      # post-deduplica
+print(result.total_new)        # nuovi in DB
+print(result.sources_failed)   # ["coindesk"] se fallita
+
+# Stop pulito
+scheduler.stop()
+
+# Singleton globale (lazy init)
+sched = get_scheduler(interval_seconds=600, db_url="sqlite:///data/crypto_news.db")
+sched.start()
+
+# One-shot senza scheduler: run_pipeline() crea un'istanza temporanea e la distrugge
+result = run_pipeline()
+```
+
+### CLI
+
+```bash
+# Avvio in modalità scheduler (background)
+python -m app.main
+
+# Run manuale one-shot
+python -m app.main run
+
+# Ultimo run dal DB
+python -m app.main status
+```
+
+### Dati di output (RunResult)
+
+```python
+@dataclass(slots=True)
+class RunResult:
+    run_id: int | None             # ID del run nel DB
+    status: str                    # "completed" | "error"
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_seconds: float        # tempo totale esecuzione
+    total_fetched: int             # articoli grezzi da tutte le fonti
+    total_clean: int               # post-normalizzazione + deduplica
+    total_new: int                 # inseriti nel DB (nuovi)
+    total_updated: int             # aggiornati nel DB (già esistenti)
+    sources_failed: list[str]      # nomi delle fonti fallite
+    source_results: dict           # {source_key: conteggio} per fonte
+    global_sentiment_score: float  # media compound VADER
+    global_sentiment_label: str    # "positive" | "neutral" | "negative"
+    error_message: str | None      # errore se status == "error"
+```
+
+---
+
 ## Installazione
 
 ### Requisiti
@@ -295,7 +369,7 @@ pytest -m "not integration"
 pytest -m integration
 ```
 
-**114 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases) + 33 sentiment test (VADER classification, aggregation, text building) + 13 database test (schema, hash dedup, upsert insert/update, CRUD article/run).
+**141 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases) + 33 sentiment test (VADER classification, aggregation, text building) + 13 database test (schema, hash dedup, upsert insert/update, CRUD article/run) + **27 scheduler test** (lifecycle, periodic scheduling, run_once, fetch isolation, singleton, error handling, status reporting).
 
 ---
 
