@@ -76,22 +76,22 @@ def _start_web_server(
         with session_scope() as session:
             articles = get_latest_articles(session, limit=limit, source=source)
 
-        result = []
-        for a in articles:
-            result.append({
-                "id": getattr(a, "id", None),
-                "source": getattr(a, "source", ""),
-                "title": getattr(a, "title", ""),
-                "url": getattr(a, "url", ""),
-                "published_at": (
-                    a.published_at.isoformat() if a.published_at else None
-                ),
-                "sentiment_compound": getattr(a, "sentiment_compound", None),
-                "sentiment_label": getattr(a, "sentiment_label", None),
-                "sentiment_pos": getattr(a, "sentiment_pos", None),
-                "sentiment_neg": getattr(a, "sentiment_neg", None),
-                "sentiment_neu": getattr(a, "sentiment_neu", None),
-            })
+            result = []
+            for a in articles:
+                result.append({
+                    "id": getattr(a, "id", None),
+                    "source": getattr(a, "source", ""),
+                    "title": getattr(a, "title", ""),
+                    "url": getattr(a, "url", ""),
+                    "published_at": (
+                        a.published_at.isoformat() if a.published_at else None
+                    ),
+                    "sentiment_compound": getattr(a, "sentiment_compound", None),
+                    "sentiment_label": getattr(a, "sentiment_label", None),
+                    "sentiment_pos": getattr(a, "sentiment_pos", None),
+                    "sentiment_neg": getattr(a, "sentiment_neg", None),
+                    "sentiment_neu": getattr(a, "sentiment_neu", None),
+                })
         return JSONResponse(content=result)
 
     @web_app.get("/api/sentiment")
@@ -104,25 +104,24 @@ def _start_web_server(
             stmt = _select(Article).where(getattr(Article, "sentiment_compound").is_not(None))
             articles = list(session.execute(stmt).scalars().all())
 
-        # Global stats
-        compounds = [a.sentiment_compound for a in articles if a.sentiment_compound is not None]
-        global_mean = sum(compounds) / len(compounds) if compounds else None
+            compounds = [a.sentiment_compound for a in articles if a.sentiment_compound is not None]
+            global_mean = sum(compounds) / len(compounds) if compounds else None
 
-        # Per-source stats
-        source_map: dict[str, list[float]] = {}
-        for a in articles:
-            if a.sentiment_compound is None:
-                continue
-            source_map.setdefault(a.source, []).append(a.sentiment_compound)
+            # Per-source stats
+            source_map: dict[str, list[float]] = {}
+            for a in articles:
+                if a.sentiment_compound is None:
+                    continue
+                source_map.setdefault(a.source, []).append(a.sentiment_compound)
 
-        sources = []
-        for name, vals in sorted(source_map.items()):
-            sources.append({
-                "source": name,
-                "count": len(vals),
-                "mean_compound": sum(vals) / len(vals),
-            })
-        sources.sort(key=lambda s: s["mean_compound"], reverse=True)
+            sources = []
+            for name, vals in sorted(source_map.items()):
+                sources.append({
+                    "source": name,
+                    "count": len(vals),
+                    "mean_compound": sum(vals) / len(vals),
+                })
+            sources.sort(key=lambda s: s["mean_compound"], reverse=True)
 
         return JSONResponse(content={
             "global_mean_compound": global_mean,
@@ -136,24 +135,24 @@ def _start_web_server(
         from sqlalchemy import desc as _desc  # noqa: PLC0415
 
         with session_scope() as session:
-            # Use table-level column to avoid pyright type confusion
             stmt = _select(Run).order_by(_desc(getattr(Run, "started_at"))).limit(limit)
             runs = list(session.execute(stmt).scalars().all())
 
-        result = []
-        for r in runs:
-            result.append({
-                "id": getattr(r, "id", None),
-                "started_at": (r.started_at.isoformat() if r.started_at else None),
-                "finished_at": (
-                    r.finished_at.isoformat() if r.finished_at else None
-                ),
-                "status": getattr(r, "status", ""),
-                "articles_fetched": getattr(r, "articles_fetched", 0),
-                "articles_new": getattr(r, "articles_new", 0),
-                "global_sentiment_score": getattr(r, "global_sentiment_score", None),
-                "global_sentiment_label": getattr(r, "global_sentiment_label", None),
-            })
+            result = []
+            for r in runs:
+                result.append({
+                    "id": getattr(r, "id", None),
+                    "started_at": (r.started_at.isoformat() if r.started_at else None),
+                    "finished_at": (
+                        r.finished_at.isoformat() if r.finished_at else None
+                    ),
+                    "status": getattr(r, "status", ""),
+                    "articles_fetched": getattr(r, "articles_fetched", 0),
+                    "articles_new": getattr(r, "articles_new", 0),
+                    "global_sentiment_score": getattr(r, "global_sentiment_score", None),
+                    "global_sentiment_label": getattr(r, "global_sentiment_label", None),
+                })
+
         return JSONResponse(content=result)
 
     import uvicorn  # noqa: PLC0415
