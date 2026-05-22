@@ -11,7 +11,7 @@ Il progetto è suddiviso in **moduli indipendenti**, ciascuno completabile e tes
 | `sources` | ✅ Pronto | Raccolta notizie da 5+ fonti RSS con normalizzazione |
 | `services` | ✅ Pronto | Pulizia, normalizzazione e deduplica degli articoli |
 | `database` | 🔲 Da fare | Persistenza articoli e risultati sentiment |
-| `sentiment` | 🔲 Da fare | Analisi sentiment su headline e summary |
+| `sentiment` | ✅ Pronto | Analisi sentiment VADER su headline e summary |
 | `api` | 🔲 Da fare | Endpoint FastAPI per consumo dati |
 | `scheduler` | 🔲 Da fare | Raccolta periodica degli articoli |
 
@@ -97,12 +97,74 @@ class CleanedArticle:
 
 ---
 
+## Modulo Sentiment (attuale)
+
+### Cosa fa
+
+- **Analisi sentiment VADER** su testo composto da titolo + summary + excerpt content
+- Classificazione in tre categorie usando soglie standard:
+  - `compound >= 0.05` → **positive**
+  - `compound <= -0.05` → **negative**
+  - altrimenti → **neutral**
+- Costruzione del testo da analizzare preservando punteggiatura e maiuscole (segnali chiave per VADER)
+- Aggregazione globale: media compound, label dominante, conteggi per categoria
+- Interfaccia `SentimentEngine` (Protocol) per futura sostituzione con transformer/LLM
+
+### Funzioni principali
+
+```python
+from app.services.sentiment import (
+    VaderSentimentEngine,
+    build_sentiment_text,
+    analyze_sentiment,
+    classify_vader,
+    aggregate_sentiment,
+)
+
+# Costruisci il testo da analizzare
+text = build_sentiment_text(title="Bitcoin crashes!", summary="BTC drops 15%")
+
+# Analizza un singolo articolo (CleanedArticle duck-type)
+result, text_used = analyze_sentiment(article)
+print(result.sentiment_label)      # "negative"
+print(result.sentiment_compound)   # -0.3129
+print(result.sentiment_engine)     # "vader"
+
+# Classificazione one-shot
+label = classify_vader(-0.31)      # "negative"
+
+# Aggrega risultati multipli
+stats = aggregate_sentiment([r1, r2, r3])
+# { mean_compound: -0.12, global_label: "negative",
+#   count_positive: 1, count_neutral: 1, count_negative: 1, total: 3 }
+
+# Risultato per articolo
+@dataclass(slots=True)
+class SentimentResult:
+    sentiment_neg: float
+    sentiment_neu: float
+    sentiment_pos: float
+    sentiment_compound: float       # -1.0 .. +1.0
+    sentiment_label: str            # "positive" | "neutral" | "negative"
+    sentiment_engine: str           # "vader" (default)
+```
+
+### Soglie VADER
+
+| Score | Categoria | Descrizione |
+|-------|-----------|-------------|
+| ≥ +0.05 | positive | Sentimento favorevole |
+| ≤ −0.05 | negative | Sentimento sfavorevole |
+| (−0.05, +0.05) | neutral | Neutro / incerto |
+
+---
+
 ## Installazione
 
 ### Requisiti
 
 - Python 3.11+
-- Dipendenze: `httpx`, `feedparser`, `beautifulsoup4`, `lxml`, `pytest`
+- Dipendenze: `httpx`, `feedparser`, `beautifulsoup4`, `lxml`, `vaderSentiment`, `pytest`
 
 ### Setup
 
@@ -161,14 +223,14 @@ pytest -m "not integration"
 pytest -m integration
 ```
 
-**68 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases).
+**101 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases) + 33 sentiment test (VADER classification, aggregation, text building).
 
 ---
 
 ## Roadmap
 
 - [ ] Modulo database con modelli articoli e sentiment
-- [ ] Modulo sentiment (analisi headline/summary)
+- [x] Modulo sentiment (analisi headline/summary con VADER)
 - [ ] API FastAPI con endpoint `/articles`, `/sources`, `/sentiment`
 - [ ] Scheduler per raccolta periodica
 - [ ] Dashboard web di visualizzazione
