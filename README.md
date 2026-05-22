@@ -9,6 +9,7 @@ Il progetto è suddiviso in **moduli indipendenti**, ciascuno completabile e tes
 | Modulo | Stato | Descrizione |
 |--------|-------|-------------|
 | `sources` | ✅ Pronto | Raccolta notizie da 5+ fonti RSS con normalizzazione |
+| `services` | ✅ Pronto | Pulizia, normalizzazione e deduplica degli articoli |
 | `database` | 🔲 Da fare | Persistenza articoli e risultati sentiment |
 | `sentiment` | 🔲 Da fare | Analisi sentiment su headline e summary |
 | `api` | 🔲 Da fare | Endpoint FastAPI per consumo dati |
@@ -46,6 +47,52 @@ class RawArticle:
     published_at: Optional[datetime]  # Data di pubblicazione
     summary: str          # Riassunto / snippet
     content: str          # Corpo completo (se disponibile)
+```
+
+---
+
+## Modulo Services (attuale)
+
+### Cosa fa
+
+- **Normalizzazione testuale**: collassa whitespace, normalizza Unicode (NFC), pulisce campi `title`, `source`, `summary`, `content`
+- **URL canonicalization**: HTTPS forzato per domini crypto conosciuti, lowercase host, rimozione `/index.html`, slash trailing, parametri query ordinati alfabeticamente, rimozione tracker (`utm_*`)
+- **Deduplica a due fasi**:
+  1. Per URL canonico (primario) — primo visto vince
+  2. Per content-hash `title + source + published_at + summary` (fallback per URL non affidabili o mirror)
+
+### Funzioni principali
+
+```python
+from app.services.dedupe import clean_and_dedupe, deduplicate_only
+from app.services.normalization import canonicalize_url, normalize_text_field
+
+# Pipeline completa: normalizza + pulisci + deduplica
+articles = fetch_latest(limit=20)  # from any source
+cleaned = clean_and_dedupe(articles)
+
+# Solo deduplica URL (senza fallback content-hash)
+cleaned = deduplicate_only(articles)
+
+# Singola funzione di normalizzazione URL
+canonical = canonicalize_url("http://coindesk.com/news?utm_source=twitter&a=1")
+# → "https://coindesk.com/news?a=1"
+```
+
+### Dati in output
+
+I `RawArticle` vengono convertiti in `CleanedArticle`:
+
+```python
+@dataclass(slots=True)
+class CleanedArticle:
+    source: str
+    title: str
+    url: str
+    published_at: datetime | None
+    summary: str          # max 500 caratteri, whitespace pulito
+    content: str          # max 5000 caratteri, whitespace pulito
+    canonical_url: str    # URL canonico per riferimento
 ```
 
 ---
@@ -114,7 +161,7 @@ pytest -m "not integration"
 pytest -m integration
 ```
 
-**29 test totali:** 22 unit test + 3 integration test + 4 test di error handling.
+**68 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases).
 
 ---
 
