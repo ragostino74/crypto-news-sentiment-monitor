@@ -13,7 +13,8 @@ Il progetto è suddiviso in **moduli indipendenti**, ciascuno completabile e tes
 | `database` | ✅ Pronto | Persistenza articoli e run con SQLAlchemy + SQLite |
 | `sentiment` | ✅ Pronto | Analisi sentiment VADER su headline e summary |
 | `scheduler` | ✅ Pronto | Job periodico per esecuzione automatica pipeline completa |
-| `api` | 🔲 Da fare | Endpoint FastAPI per consumo dati |
+| `api` | ✅ Pronto | Endpoint FastAPI (articles, sentiment, runs) |
+| `dashboard` | ✅ Pronto | Dashboard web con tabella articoli + card sentiment |
 
 ---
 
@@ -310,7 +311,7 @@ class RunResult:
 ### Requisiti
 
 - Python 3.11+
-- Dipendenze: `httpx`, `feedparser`, `beautifulsoup4`, `lxml`, `vaderSentiment`, `pytest`
+- Dipendenze: `httpx`, `feedparser`, `beautifulsoup4`, `lxml`, `vaderSentiment`, `pytest`, `fastapi`, `uvicorn`, `jinja2`
 
 ### Setup
 
@@ -373,14 +374,80 @@ pytest -m integration
 
 ---
 
+## Dashboard Web (v0.6.0)
+
+### Cosa fa
+
+- **Tabella articoli** con ultime notizie, badge sentiment colorati per riga
+- **Card sentiment globale**: media compound VADER + label dominante
+- **Card sentiment per fonte**: ordinato dal più positivo al più negativo
+- **Refresh automatico** ogni 60 secondi via JavaScript fetch
+- **API REST** integrate: `/api/articles`, `/api/sentiment`, `/api/runs`
+
+### CLI
+
+```bash
+# Avvia il server dashboard su localhost:8000
+python -m app.main web
+
+# Con host e porta custom
+python -m app.main web --host 0.0.0.0 --port 8080
+
+# Con database custom
+python -m app.main web --db-url sqlite:///data/crypto_news.db
+```
+
+### Endpoints API
+
+| Endpoint | Metodo | Descrizione |
+|----------|--------|-------------|
+| `/` | GET | Dashboard web |
+| `/api/articles` | GET | Ultima lista articoli (parametri: `limit`, `source`) |
+| `/api/sentiment` | GET | Aggregati sentiment globale + per fonte |
+| `/api/runs` | GET | Ultime esecuzioni pipeline |
+
+---
+
+## Containerizzazione (v0.6.0)
+
+### Docker
+
+```bash
+# Build e avvio
+docker build -t crypto-news-monitor .
+
+# Esegui con persistenza SQLite su volume
+docker run -d --name crypto-news-sentiment \
+  -p 8000:8000 \
+  -v sqlite-data:/app/data \
+  crypto-news-monitor
+```
+
+### Docker Compose
+
+```bash
+# Avvia tutto (build + volume + auto-restart)
+docker compose up -d
+
+# Visualizza log
+docker compose logs -f
+
+# Ferma e rimuovi
+docker compose down
+```
+
+Il database SQLite è persistito su un named volume `sqlite-data` così sopravvive al riavvio del container.
+
+---
+
 ## Roadmap
 
 - [x] Modulo database con modelli articoli e run (SQLAlchemy + SQLite)
 - [x] Modulo sentiment (analisi headline/summary con VADER)
-- [ ] API FastAPI con endpoint `/articles`, `/sources`, `/sentiment`
-- [ ] Scheduler per raccolta periodica
-- [ ] Dashboard web di visualizzazione
-- [ ] Docker support
+- [x] API FastAPI con endpoint /articles, /sources, /sentiment
+- [x] Scheduler per raccolta periodica
+- [x] Dashboard web con tabella articoli, card sentiment, refresh automatico
+- [x] Containerizzazione (Docker + docker-compose)
 
 ---
 
