@@ -1,6 +1,11 @@
-httpx>=0.27
-feedparser>=6.0
-beautifulsoup4>=4.12
-lxml>=5.0
-vaderSentiment>=3.3
-pytest>=8.0
+# Core
+requests>=2.31,<3
+feedparser>=6.0,<7
+newspaper3k>=0.2.8,<0.3
+
+# NLP / Sentiment
+textblob>=0.18,<0.19
+vaderSentiment>=3.3,<4
+
+# Database (SQLAlchemy ORM)
+SQLAlchemy>=2.0,<3

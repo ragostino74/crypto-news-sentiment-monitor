@@ -10,7 +10,7 @@ Il progetto è suddiviso in **moduli indipendenti**, ciascuno completabile e tes
 |--------|-------|-------------|
 | `sources` | ✅ Pronto | Raccolta notizie da 5+ fonti RSS con normalizzazione |
 | `services` | ✅ Pronto | Pulizia, normalizzazione e deduplica degli articoli |
-| `database` | 🔲 Da fare | Persistenza articoli e risultati sentiment |
+| `database` | ✅ Pronto | Persistenza articoli e run con SQLAlchemy + SQLite |
 | `sentiment` | ✅ Pronto | Analisi sentiment VADER su headline e summary |
 | `api` | 🔲 Da fare | Endpoint FastAPI per consumo dati |
 | `scheduler` | 🔲 Da fare | Raccolta periodica degli articoli |
@@ -159,6 +159,78 @@ class SentimentResult:
 
 ---
 
+---
+
+## Modulo Database (attuale)
+
+### Cosa fa
+
+- **Persistenza SQLite** tramite SQLAlchemy 2.x con ORM dichiarativo
+- Due tabelle principali:
+  - `articles` — ogni articolo raccolto, normalizzato e analizzato, con deduplicazione per hash SHA-256 (`source + url`)
+  - `runs` — traccia di ogni esecuzione completa della pipeline (fetch → normalizza → sentiment) con conteggi e aggregati sentiment
+- **Session factory** con context manager per transaction safety (commit/rollback automatico)
+
+### Modelli ORM
+
+```python
+# Article — colonna chiave per deduplicazione: article_hash (SHA-256 di source|url)
+class Article(Base):
+    id, article_hash, source, title, url, published_at
+    summary, content, scraped_at
+    sentiment_pos, sentiment_neu, sentiment_neg, sentiment_compound
+    sentiment_label, sentiment_engine, run_id
+
+# Run — lifecycle della pipeline
+class Run(Base):
+    id, started_at, finished_at
+    articles_fetched, articles_new
+    global_sentiment_score, global_sentiment_label
+    status, error_message
+```
+
+### Funzioni CRUD principali
+
+```python
+from app.core.db import (
+    init_db,          # Crea tutte le tabelle (Base.metadata.create_all)
+    session_scope,    # Context manager per transazioni con rollback automatico
+    upsert_article,   # Insert o update se article_hash esiste (ritorna True/False)
+    get_latest_articles,  # Ultimi N articoli, ordinati per scraped_at DESC
+    get_article_by_hash,  # Cerca per hash di deduplicazione
+    create_run,       # Crea un nuovo run con status "running"
+    finish_run,       # Finalizza il run con conteggi e aggregati sentiment
+    get_last_run,     # Utimo run eseguito
+)
+
+# Inizializzazione
+init_db()  # crea tabelle su data/crypto_news.db (default)
+
+# Uso in pipeline
+with session_scope() as session:
+    run = create_run(session, articles_fetched=100)
+    for article_data in cleaned_articles:
+        inserted = upsert_article(session, **article_data, run_id=run.id)
+    finish_run(
+        session, run.id,
+        articles_new=len(inserted_list),
+        global_sentiment_score=mean_compound,
+        global_sentiment_label=dominant_label,
+    )
+```
+
+### Configurazione database
+
+```python
+# Default: file SQLite in data/crypto_news.db
+init_db()
+
+# Custom URL (es. per test)
+init_db("sqlite:///:memory:")
+```
+
+---
+
 ## Installazione
 
 ### Requisiti
@@ -223,13 +295,13 @@ pytest -m "not integration"
 pytest -m integration
 ```
 
-**101 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases) + 33 sentiment test (VADER classification, aggregation, text building).
+**114 test totali:** 29 source test (22 unit + 3 integration live + 4 error handling) + 39 services test (whitespace, URL canonicalization, normalize_article, URL dedup, content-hash fallback, filtering, edge cases) + 33 sentiment test (VADER classification, aggregation, text building) + 13 database test (schema, hash dedup, upsert insert/update, CRUD article/run).
 
 ---
 
 ## Roadmap
 
-- [ ] Modulo database con modelli articoli e sentiment
+- [x] Modulo database con modelli articoli e run (SQLAlchemy + SQLite)
 - [x] Modulo sentiment (analisi headline/summary con VADER)
 - [ ] API FastAPI con endpoint `/articles`, `/sources`, `/sentiment`
 - [ ] Scheduler per raccolta periodica
