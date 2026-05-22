@@ -180,6 +180,9 @@ class Scheduler:
         Returns:
             ``RunResult`` with statistics and status.
         """
+        # Ensure DB tables exist even outside of start().
+        init_db(self.db_url)
+
         result = RunResult(status="running")
         result.started_at = datetime.now(timezone.utc)
 
@@ -202,8 +205,11 @@ class Scheduler:
             result.total_clean = len(clean_and_dedupe(raw_articles))
             logger.info("Pipeline run: %d raw → %d clean", total_fetched, result.total_clean)
 
-            # --- Phase 3: Sentiment analysis -------------------------------
-            sentiment_results, new_count, updated_count = self._persist_with_sentiment(raw_articles)
+            # --- Phase 3: Sentiment analysis + persistence ---------------------------
+            sentiment_results, new_count, updated_count, run_id = self._persist_with_sentiment(
+                raw_articles,
+            )
+            result.run_id = run_id
             result.total_new = new_count
             result.total_updated = updated_count
 
@@ -218,7 +224,6 @@ class Scheduler:
             logger.exception("Pipeline run FAILED")
             result.status = "error"
             result.error_message = str(exc)
-            # Try to mark the run as failed even if we never created it.
             self._finish_run(result, error_message=str(exc))
 
         finally:
@@ -273,7 +278,7 @@ class Scheduler:
         """Normalise, deduplicate, analyse sentiment, and persist articles.
 
         Returns:
-            Tuple of (sentiment_results, new_count, updated_count).
+            Tuple of (sentiment_results, new_count, updated_count, run_id).
         """
         from app.sources import SOURCES  # noqa: PLC0415
 
@@ -283,12 +288,9 @@ class Scheduler:
             run = create_run(
                 session,
                 status="running",
-                articles_fetched=sum(
-                    len(fetch_fn()) for _, (_, fetch_fn) in SOURCES.items()
-                ),
+                articles_fetched=len(raw_articles),
             )
             session.flush()
-            # cast object → int because create_run flushes and populates id
             run_id = int(getattr(run, "id", 0))
 
         sentiment_results: list[SentimentResult] = []
@@ -323,7 +325,21 @@ class Scheduler:
                 else:
                     updated_count += 1
 
-        return sentiment_results, new_count, updated_count
+        # --- Finalise the run in DB ---------------------------------------------
+        sentiment_results_agg = aggregate_sentiment(sentiment_results) if sentiment_results else {}
+        try:
+            with session_scope() as session:
+                finish_run(
+                    session,
+                    run_id,
+                    articles_new=new_count,
+                    global_sentiment_score=sentiment_results_agg.get("mean_compound"),
+                    global_sentiment_label=sentiment_results_agg.get("global_label", "neutral"),
+                )
+        except Exception:
+            logger.exception("Failed to finalise run %d in DB", run_id)
+
+        return sentiment_results, new_count, updated_count, run_id
 
     def _finish_run(self, result: RunResult, error_message: str | None = None) -> None:
         """Mark the run as completed or failed in the database."""
