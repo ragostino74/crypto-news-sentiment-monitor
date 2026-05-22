@@ -93,6 +93,9 @@ class Article(Base):
     # Link to the run that collected this article.
     run_id: Optional[int] = Column(Integer, ForeignKey("runs.id"), nullable=True)
 
+    # Detected crypto topics (JSON array of display names, e.g. "[\"Bitcoin\", \"Ethereum\"]").
+    topics: str = Column(Text, nullable=True, default="")
+
     # ORM relationships.
     run = relationship("Run", back_populates="articles", lazy="select")
 

@@ -46,6 +46,7 @@ from app.services.sentiment import (
     aggregate_sentiment,
     analyze_sentiment,
 )
+from app.services.topics import detect_topics_v2
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +302,12 @@ class Scheduler:
             for article in cleaned:
                 # --- Sentiment analysis ---------------------------------------
                 sr, _text = analyze_sentiment(article)
+
+                # --- Crypto topic detection -----------------------------------
+                combined_text = f"{article.title} {article.summary}"
+                detected = detect_topics_v2(combined_text)
+                topics_json = str(detected)  # JSON-serialised list of names
+
                 sentiment_results.append(sr)
 
                 # --- Persist to DB --------------------------------------------
@@ -319,6 +326,7 @@ class Scheduler:
                     sentiment_label=sr.sentiment_label,
                     sentiment_engine=sr.sentiment_engine,
                     run_id=run_id,
+                    topics=topics_json,
                 )
                 if inserted:
                     new_count += 1

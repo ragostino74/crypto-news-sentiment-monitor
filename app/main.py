@@ -40,9 +40,15 @@ def _start_web_server(
     from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
     from jinja2 import Environment, FileSystemLoader  # noqa: PLC0415
 
-    from app.core.db import get_session, get_latest_articles, session_scope  # noqa: PLC0415
+    from app.core.db import (
+        get_crypto_sentiment,
+        get_latest_articles,
+        get_session,
+        session_scope,
+    )
     from app.models.article import Article  # noqa: PLC0415
     from app.models.run import Run  # noqa: PLC0415
+    from app.services.topics import get_crypto_list  # noqa: PLC0415
     import app  # noqa: PLC0415
 
     @asynccontextmanager
@@ -72,9 +78,9 @@ def _start_web_server(
         return HTMLResponse(content=html)
 
     @web_app.get("/api/articles")
-    async def api_articles(limit: int = 100, source: str | None = None):
+    async def api_articles(limit: int = 100, source: str | None = None, topic: str | None = None):
         with session_scope() as session:
-            articles = get_latest_articles(session, limit=limit, source=source)
+            articles = get_latest_articles(session, limit=limit, source=source, topic=topic)
 
             result = []
             for a in articles:
@@ -91,8 +97,16 @@ def _start_web_server(
                     "sentiment_pos": getattr(a, "sentiment_pos", None),
                     "sentiment_neg": getattr(a, "sentiment_neg", None),
                     "sentiment_neu": getattr(a, "sentiment_neu", None),
+                    "topics": getattr(a, "topics", ""),
                 })
         return JSONResponse(content=result)
+
+    @web_app.get("/api/crypto-topics")
+    async def api_crypto_topics():
+        """Return the list of supported crypto topics."""
+        return JSONResponse(content={
+            "cryptos": get_crypto_list(),
+        })
 
     @web_app.get("/api/sentiment")
     async def api_sentiment():
@@ -128,6 +142,13 @@ def _start_web_server(
             "total_articles": len(articles),
             "sources": sources,
         })
+
+    @web_app.get("/api/crypto-sentiment")
+    async def api_crypto_sentiment(crypto: str):
+        """Per-crypto sentiment aggregate."""
+        with session_scope() as session:
+            data = get_crypto_sentiment(session, crypto, limit=100)
+        return JSONResponse(content=data if data else {"error": "No articles found for this crypto"})
 
     @web_app.get("/api/runs")
     async def api_runs(limit: int = 10):

@@ -11,6 +11,10 @@
         <h1>&#x1F4E8; Crypto News &amp; Sentiment</h1>
         <p class="subtitle">Monitoraggio notizie e sentiment dalle principali fonti crypto</p>
         <div class="header-controls">
+            <!-- Crypto topic selector -->
+            <select id="crypto-selector" onchange="onCryptoChange()">
+                <option value="">&#x1F30D; Tutte le cripto (globale)</option>
+            </select>
             <span id="last-update" class="update-time">Aggiornamento...</span>
             <button id="refresh-btn" class="btn btn-sm" onclick="loadDashboard()">Ricarica</button>
         </div>
@@ -19,7 +23,7 @@
     <!-- Stats cards -->
     <section class="stats-grid">
         <div class="card stat-card">
-            <h3>Sentiment Globale</h3>
+            <h3 id="sentiment-title">Sentiment Globale</h3>
             <div id="global-sentiment" class="sentiment-gauge">
                 <span class="gauge-value" id="gauge-score">--</span>
                 <span class="gauge-label" id="gauge-label">Nessun dato</span>
@@ -75,6 +79,7 @@
     <script>
         const AUTO_REFRESH_MS = 60000;
         let refreshTimer = null;
+        let selectedCrypto = '';
 
         function formatScore(score) {
             if (score === null || score === undefined) return '--';
@@ -86,13 +91,6 @@
             if (compound > 0.05) return 'badge-positive';
             if (compound < -0.05) return 'badge-negative';
             return 'badge-neutral';
-        }
-
-        function getSentimentLabel(compound) {
-            if (compound === null || compound === undefined) return 'N/A';
-            if (compound > 0.05) return '&check; Positivo';
-            if (compound < -0.05) return '&times; Negativo';
-            return '&#8512; Neutrale';
         }
 
         function formatDate(isoStr) {
@@ -190,15 +188,52 @@
             tbody.innerHTML = html;
         }
 
+        // --- Crypto selector logic ---
+
+        async function loadCryptoTopics() {
+            try {
+                const res = await fetch('/api/crypto-topics');
+                const data = await res.json();
+                const select = document.getElementById('crypto-selector');
+
+                select.innerHTML = '<option value="">&#x1F30D; Tutte le cripto (globale)</option>';
+                for (const [name, symbol] of data.cryptos) {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = `${symbol} - ${name}`;
+                    select.appendChild(opt);
+                }
+            } catch (err) {
+                console.error('Errore caricamento crypto topics:', err);
+            }
+        }
+
+        function onCryptoChange() {
+            const select = document.getElementById('crypto-selector');
+            selectedCrypto = select.value;
+            if (selectedCrypto) {
+                document.getElementById('sentiment-title').textContent = `Sentiment ${selectedCrypto}`;
+            } else {
+                document.getElementById('sentiment-title').textContent = 'Sentiment Globale';
+            }
+            loadDashboard();
+        }
+
         async function loadDashboard() {
             const timeEl = document.getElementById('last-update');
             timeEl.textContent = 'Aggiornamento...';
 
             try {
-                const articlesRes = await fetch('/api/articles?limit=100');
+                // Build query params based on crypto selection
+                let url = '/api/articles?limit=100';
+                if (selectedCrypto) {
+                    url += '&topic=' + encodeURIComponent(selectedCrypto);
+                }
+
+                const articlesRes = await fetch(url);
                 const articlesData = await articlesRes.json();
 
-                // Global sentiment: average across all articles
+                // Compute global sentiment from returned articles
                 let globalSentiment = null;
                 if (articlesData && articlesData.length > 0) {
                     const compounds = articlesData
@@ -226,7 +261,6 @@
                     mean_compound: vals.reduce((a, b) => a + b, 0) / vals.length
                 })).sort((a, b) => b.mean_compound - a.mean_compound);
 
-                // Active sources
                 const activeSources = Object.keys(sourceMap).length;
 
                 renderGlobalSentiment(globalSentiment);
@@ -245,6 +279,7 @@
 
         // Init
         document.getElementById('version-display').textContent = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '--';
+        loadCryptoTopics();
         loadDashboard();
         refreshTimer = setInterval(loadDashboard, AUTO_REFRESH_MS);
 

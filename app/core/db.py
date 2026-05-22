@@ -146,6 +146,23 @@ def init_db(db_url: str | None = None):
 
     engine = get_engine(db_url)
     Base.metadata.create_all(engine)
+
+    # --- Schema migration: add ``topics`` column if missing ---
+    from sqlalchemy import text as _text  # noqa: PLC0415, E402
+
+    with engine.connect() as conn:
+        # Check if articles table exists and has 'topics' column
+        result = conn.execute(_text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='articles'"
+        )).fetchone()
+        if result:
+            col_result = conn.execute(_text("PRAGMA table_info(articles)")).fetchall()
+            col_names = [c[1] for c in col_result]
+            if "topics" not in col_names:
+                logger.info("Migration: adding 'topics' column to articles table")
+                conn.execute(_text("ALTER TABLE articles ADD COLUMN topics TEXT DEFAULT ''"))
+                conn.commit()
+
     logger.info("Database initialised (url=%s)", db_url or _DEFAULT_DB_URL)
 
 
@@ -168,6 +185,7 @@ def upsert_article(
     sentiment_label: str | None = None,
     sentiment_engine: str = "vader",
     run_id: int | None = None,
+    topics: str = "",
 ) -> bool:
     """Insert an article or update it if the hash already exists.
 
@@ -211,6 +229,8 @@ def upsert_article(
             existing.sentiment_engine = sentiment_engine
         if run_id is not None:
             existing.run_id = run_id
+        if topics:
+            existing.topics = topics
         return False
 
     # New article — create and insert.
@@ -230,6 +250,7 @@ def upsert_article(
         sentiment_label=sentiment_label,
         sentiment_engine=sentiment_engine,
         run_id=run_id,
+        topics=topics,
     )
     session.add(new_article)
     return True
@@ -239,6 +260,7 @@ def get_latest_articles(
     session: Session,
     limit: int = 50,
     source: str | None = None,
+    topic: str | None = None,
 ) -> list:
     """Return the N most recently scraped articles.
 
@@ -246,6 +268,8 @@ def get_latest_articles(
         session: Active SQLAlchemy session.
         limit: Maximum number of rows to return (default 50).
         source: Optional filter by source name.
+        topic: Optional crypto topic filter — matches if the article's
+            ``topics`` JSON column contains this display name.
 
     Returns:
         List of ``Article`` ORM objects ordered by ``scraped_at DESC``.
@@ -256,6 +280,10 @@ def get_latest_articles(
 
     if source:
         stmt = stmt.where(Article.source == source)
+
+    if topic:
+        # SQLite JSON match: check if the display name appears in topics array
+        stmt = stmt.where(Article.topics.like(f"%{topic}%"))
 
     return list(session.execute(stmt).scalars().all())
 
@@ -273,6 +301,72 @@ def get_article_by_hash(
     return session.execute(
         select(Article).where(Article.article_hash == article_hash)
     ).scalar_one_or_none()
+
+
+def get_crypto_sentiment(
+    session: Session,
+    crypto_name: str,
+    limit: int = 50,
+) -> dict | None:
+    """Return aggregate sentiment for articles mentioning a specific crypto.
+
+    Uses LIKE to match the crypto name inside the ``topics`` JSON column.
+
+    Args:
+        session: Active SQLAlchemy session.
+        crypto_name: Display name from CRYPTO_LIST (e.g. "Bitcoin").
+        limit: Maximum number of articles to consider (default 50).
+
+    Returns:
+        Dict with keys ``mean_compound``, ``global_label``, ``article_count``,
+        ``sentiment_breakdown`` ({"positive": N, "neutral": N, "negative": N}),
+        or None if no matching articles found.
+    """
+    from app.models.article import Article  # noqa: PLC0415
+
+    stmt = (
+        select(Article)
+        .where(Article.topics.like(f"%{crypto_name}%"))
+        .order_by(Article.scraped_at.desc())
+        .limit(limit)
+    )
+    articles = list(session.execute(stmt).scalars().all())
+
+    if not articles:
+        return None
+
+    compound_values = [a.sentiment_compound for a in articles if a.sentiment_compound is not None]
+    labels = [a.sentiment_label for a in articles if a.sentiment_label]
+
+    if not compound_values:
+        return {
+            "crypto": crypto_name,
+            "mean_compound": None,
+            "global_label": "neutral",
+            "article_count": len(articles),
+            "sentiment_breakdown": {"positive": 0, "neutral": 0, "negative": 0},
+        }
+
+    mean_compound = sum(compound_values) / len(compound_values)
+
+    pos = labels.count("positive")
+    neg = labels.count("negative")
+    neu = labels.count("neutral")
+
+    if mean_compound >= 0.05:
+        label = "positive"
+    elif mean_compound <= -0.05:
+        label = "negative"
+    else:
+        label = "neutral"
+
+    return {
+        "crypto": crypto_name,
+        "mean_compound": round(mean_compound, 4),
+        "global_label": label,
+        "article_count": len(articles),
+        "sentiment_breakdown": {"positive": pos, "neutral": neu, "negative": neg},
+    }
 
 
 # ------------------------------------------------------------------ Run CRUD ---

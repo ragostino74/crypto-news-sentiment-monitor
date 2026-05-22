@@ -34,6 +34,23 @@ body {
     gap: 1rem;
     margin-top: 0.75rem;
 }
+/* --- Crypto selector dropdown --- */
+#crypto-selector {
+    background: #1a2733;
+    color: #e0e6ed;
+    border: 1px solid #253847;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    min-width: 240px;
+    transition: border-color 0.2s;
+}
+#crypto-selector:hover,
+#crypto-selector:focus {
+    border-color: #3498db;
+    outline: none;
+}
 .update-time {
     font-size: 0.8rem;
     color: #6b8299;
