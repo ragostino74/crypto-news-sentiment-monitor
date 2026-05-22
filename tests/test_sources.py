@@ -4,7 +4,8 @@ Covers:
   - Shared utility functions (strip_html_tags, normalize_summary)
   - RawArticle data model
   - entry_to_article conversion logic
-  - Integration-style fetch tests for CoinDesk and Cointelegraph
+  - Integration-style fetch tests for all 10 crypto RSS sources
+  - Error handling — each adapter returns [] on network failure
 
 Run with: pytest tests/ -v
 """
@@ -293,6 +294,104 @@ class TestLiveFetch:
             assert len(article.title) > 0
             assert "http" in article.url
 
+    @pytest.mark.integration
+    def test_theblock_fetch(self):
+        from app.sources.theblock import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "The Block"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
+    @pytest.mark.integration
+    def test_cryptoslate_fetch(self):
+        from app.sources.cryptoslate import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "CryptoSlate"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
+    @pytest.mark.integration
+    def test_coinjournal_fetch(self):
+        from app.sources.coinjournal import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "CoinJournal"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
+    @pytest.mark.integration
+    def test_ambcrypto_fetch(self):
+        from app.sources.ambcrypto import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "AMBCrypto"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
+    @pytest.mark.integration
+    def test_bitcoinist_fetch(self):
+        from app.sources.bitcoinist import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "Bitcoinist"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
+    @pytest.mark.integration
+    def test_cryptopotato_fetch(self):
+        from app.sources.cryptopotato import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "CryptoPotato"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
+    @pytest.mark.integration
+    def test_beincrypto_fetch(self):
+        from app.sources.beincrypto import fetch_latest
+
+        articles = fetch_latest(limit=5)
+        assert isinstance(articles, list)
+
+        if articles:
+            article = articles[0]
+            assert isinstance(article, RawArticle)
+            assert article.source == "BeInCrypto"
+            assert len(article.title) > 0
+            assert "http" in article.url
+
 
 # ====================================================================
 # 5. Error handling — adapter returns empty list on failure
@@ -312,6 +411,46 @@ class TestErrorHandling:
         from app.sources.cointelegraph import fetch_latest
 
         with patch("app.sources.cointelegraph.fetch_rss_feed") as mock_fetch:
+            mock_fetch.side_effect = Exception("Network error")
+            articles = fetch_latest()
+            assert articles == []
+
+    def test_ambcrypto_no_network(self):
+        from app.sources.ambcrypto import fetch_latest
+
+        with patch("app.sources.ambcrypto.fetch_rss_feed") as mock_fetch:
+            mock_fetch.side_effect = Exception("Network error")
+            articles = fetch_latest()
+            assert articles == []
+
+    def test_cryptopotato_no_network(self):
+        from app.sources.cryptopotato import fetch_latest
+
+        with patch("app.sources.cryptopotato.fetch_rss_feed") as mock_fetch:
+            mock_fetch.side_effect = Exception("Network error")
+            articles = fetch_latest()
+            assert articles == []
+
+    def test_beincrypto_no_network(self):
+        from app.sources.beincrypto import fetch_latest
+
+        with patch("app.sources.beincrypto.fetch_rss_feed") as mock_fetch:
+            mock_fetch.side_effect = Exception("Network error")
+            articles = fetch_latest()
+            assert articles == []
+
+    def test_coinjournal_no_network(self):
+        from app.sources.coinjournal import fetch_latest
+
+        with patch("app.sources.coinjournal.fetch_rss_feed") as mock_fetch:
+            mock_fetch.side_effect = Exception("Network error")
+            articles = fetch_latest()
+            assert articles == []
+
+    def test_bitcoinist_no_network(self):
+        from app.sources.bitcoinist import fetch_latest
+
+        with patch("app.sources.bitcoinist.fetch_rss_feed") as mock_fetch:
             mock_fetch.side_effect = Exception("Network error")
             articles = fetch_latest()
             assert articles == []
