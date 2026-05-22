@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto News Sentiment Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="header">
+        <h1>&#x1F4E8; Crypto News &amp; Sentiment</h1>
+        <p class="subtitle">Monitoraggio notizie e sentiment dalle principali fonti crypto</p>
+        <div class="header-controls">
+            <span id="last-update" class="update-time">Aggiornamento...</span>
+            <button id="refresh-btn" class="btn btn-sm" onclick="loadDashboard()">Ricarica</button>
+        </div>
+    </header>
+
+    <!-- Stats cards -->
+    <section class="stats-grid">
+        <div class="card stat-card">
+            <h3>Sentiment Globale</h3>
+            <div id="global-sentiment" class="sentiment-gauge">
+                <span class="gauge-value" id="gauge-score">--</span>
+                <span class="gauge-label" id="gauge-label">Nessun dato</span>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <h3>Articoli Totali</h3>
+            <span id="total-articles" class="big-number">--</span>
+        </div>
+        <div class="card stat-card">
+            <h3>Fonti Attive</h3>
+            <span id="active-sources" class="big-number">--</span>
+        </div>
+    </section>
+
+    <!-- Sentiment by source -->
+    <section class="card source-sentiment-section">
+        <h2>Sentiment per Fonte</h2>
+        <div id="source-sentiment" class="source-bars"></div>
+    </section>
+
+    <!-- Articles table -->
+    <section class="card articles-section">
+        <div class="table-header">
+            <h2>Ultime Notizie</h2>
+            <span id="article-count" class="badge badge-neutral">-- articoli</span>
+        </div>
+        <div class="table-wrapper">
+            <table class="articles-table">
+                <thead>
+                    <tr>
+                        <th>Sentiment</th>
+                        <th>Fonte</th>
+                        <th>Titolo</th>
+                        <th>Pubblicata</th>
+                    </tr>
+                </thead>
+                <tbody id="articles-body">
+                    <tr class="loading-row">
+                        <td colspan="4" class="text-center">Caricamento dati...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <span>Crypto News Sentiment Monitor v<span id="version-display"></span></span>
+        <span>Auto-refresh ogni 60s</span>
+    </footer>
+
+    <script>
+        const AUTO_REFRESH_MS = 60000;
+        let refreshTimer = null;
+
+        function formatScore(score) {
+            if (score === null || score === undefined) return '--';
+            return score >= 0 ? '+' + score.toFixed(2) : score.toFixed(2);
+        }
+
+        function getSentimentBadgeClass(compound) {
+            if (compound === null || compound === undefined) return 'badge-neutral';
+            if (compound > 0.05) return 'badge-positive';
+            if (compound < -0.05) return 'badge-negative';
+            return 'badge-neutral';
+        }
+
+        function getSentimentLabel(compound) {
+            if (compound === null || compound === undefined) return 'N/A';
+            if (compound > 0.05) return '&check; Positivo';
+            if (compound < -0.05) return '&times; Negativo';
+            return '&#8512; Neutrale';
+        }
+
+        function formatDate(isoStr) {
+            if (!isoStr) return '--';
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return isoStr;
+            return d.toLocaleString('it-IT', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+        }
+
+        function renderGlobalSentiment(data) {
+            const scoreEl = document.getElementById('gauge-score');
+            const labelEl = document.getElementById('gauge-label');
+            const gauge = document.getElementById('global-sentiment');
+
+            if (!data || data.mean_compound === null) {
+                scoreEl.textContent = '--';
+                labelEl.textContent = 'Nessun dato';
+                gauge.className = 'sentiment-gauge sentiment-unknown';
+                return;
+            }
+
+            const s = data.mean_compound;
+            scoreEl.textContent = formatScore(s);
+
+            if (s > 0.05) {
+                labelEl.innerHTML = '&#x1F60A; Positivo';
+                gauge.className = 'sentiment-gauge sentiment-positive';
+            } else if (s < -0.05) {
+                labelEl.innerHTML = '&#x1F625; Negativo';
+                gauge.className = 'sentiment-gauge sentiment-negative';
+            } else {
+                labelEl.innerHTML = '&#x1F914; Neutrale';
+                gauge.className = 'sentiment-gauge sentiment-neutral';
+            }
+        }
+
+        function renderSourceBars(data) {
+            const container = document.getElementById('source-sentiment');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p class="text-muted">Nessun dato disponibile.</p>';
+                return;
+            }
+
+            let html = '';
+            for (const src of data) {
+                const count = src.count || 0;
+                if (count === 0) continue;
+
+                const s = src.mean_compound ?? 0;
+                const barColor = s > 0.05 ? '#2ecc71' : s < -0.05 ? '#e74c3c' : '#95a5a6';
+                const barWidth = Math.min(Math.abs(s) * 500, 100);
+
+                html += `
+                    <div class="source-bar-row">
+                        <span class="source-name">${src.source}</span>
+                        <div class="source-bar-track">
+                            <div class="source-bar-fill" style="width: ${barWidth}%; background: ${barColor};"></div>
+                        </div>
+                        <span class="source-meta">${formatScore(s)} · ${count} art.</span>
+                    </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function renderArticles(articles) {
+            const tbody = document.getElementById('articles-body');
+            document.getElementById('article-count').textContent = articles.length + ' articoli';
+
+            if (articles.length === 0) {
+                tbody.innerHTML = '<tr class="loading-row"><td colspan="4" class="text-center">Nessun articolo trovato.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            for (const a of articles) {
+                const badgeClass = getSentimentBadgeClass(a.sentiment_compound);
+                const sentimentIcon = a.sentiment_label === 'positive' ? '&#x1F60A;' :
+                                      a.sentiment_label === 'negative' ? '&#x1F625;' :
+                                      a.sentiment_label === 'neutral' ? '&#x1F914;' : '?';
+
+                const title = (a.title || '').replace(/</g, '&lt;').substring(0, 100);
+                const link = a.url ? `<a href="${a.url.replace(/"/g, '&quot;')}" target="_blank" rel="noopener">${title}&#x2197;</a>` : title;
+
+                html += `
+                    <tr>
+                        <td><span class="badge ${badgeClass}">${sentimentIcon} ${formatScore(a.sentiment_compound)}</span></td>
+                        <td>${a.source}</td>
+                        <td>${link}</td>
+                        <td>${formatDate(a.published_at)}</td>
+                    </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+
+        async function loadDashboard() {
+            const timeEl = document.getElementById('last-update');
+            timeEl.textContent = 'Aggiornamento...';
+
+            try {
+                const articlesRes = await fetch('/api/articles?limit=100');
+                const articlesData = await articlesRes.json();
+
+                // Global sentiment: average across all articles
+                let globalSentiment = null;
+                if (articlesData && articlesData.length > 0) {
+                    const compounds = articlesData
+                        .map(a => a.sentiment_compound)
+                        .filter(v => v !== null && v !== undefined);
+                    if (compounds.length > 0) {
+                        globalSentiment = {
+                            mean_compound: compounds.reduce((a, b) => a + b, 0) / compounds.length,
+                            count: compounds.length
+                        };
+                    }
+                }
+
+                // Sentiment by source
+                const sourceMap = {};
+                for (const a of (articlesData || [])) {
+                    if (!sourceMap[a.source]) sourceMap[a.source] = [];
+                    if (a.sentiment_compound !== null && a.sentiment_compound !== undefined) {
+                        sourceMap[a.source].push(a.sentiment_compound);
+                    }
+                }
+                const sourceBars = Object.entries(sourceMap).map(([source, vals]) => ({
+                    source: source,
+                    count: vals.length,
+                    mean_compound: vals.reduce((a, b) => a + b, 0) / vals.length
+                })).sort((a, b) => b.mean_compound - a.mean_compound);
+
+                // Active sources
+                const activeSources = Object.keys(sourceMap).length;
+
+                renderGlobalSentiment(globalSentiment);
+                renderSourceBars(sourceBars);
+                renderArticles(articlesData || []);
+
+                document.getElementById('total-articles').textContent = articlesData ? articlesData.length : '--';
+                document.getElementById('active-sources').textContent = activeSources || '--';
+
+                timeEl.textContent = 'Aggiornato: ' + new Date().toLocaleTimeString('it-IT');
+            } catch (err) {
+                console.error('Errore caricamento dashboard:', err);
+                timeEl.textContent = 'Errore aggiornamento';
+            }
+        }
+
+        // Init
+        document.getElementById('version-display').textContent = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '--';
+        loadDashboard();
+        refreshTimer = setInterval(loadDashboard, AUTO_REFRESH_MS);
+
+        // Reset timer on manual click
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            clearInterval(refreshTimer);
+            refreshTimer = setInterval(loadDashboard, AUTO_REFRESH_MS);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+services:
+  crypto-news-sentiment-monitor:
+    build: .
+    container_name: crypto-news-sentiment
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - sqlite-data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  sqlite-data:
+    driver: local

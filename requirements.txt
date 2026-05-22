@@ -7,5 +7,10 @@ newspaper3k>=0.2.8,<0.3
 textblob>=0.18,<0.19
 vaderSentiment>=3.3,<4
 
+# Web / Dashboard (v0.6.0)
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+jinja2>=3.1,<4
+
 # Database (SQLAlchemy ORM)
 SQLAlchemy>=2.0,<3

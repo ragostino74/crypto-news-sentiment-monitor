@@ -24,6 +24,142 @@ import signal
 import sys
 from pathlib import Path
 
+# ------------------------------------------------------------------ Web server (FastAPI) ---
+
+
+def _start_web_server(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    db_url: str | None = None,
+) -> None:
+    """Start the FastAPI web server with dashboard and API endpoints."""
+    from contextlib import asynccontextmanager  # noqa: PLC0415
+
+    from fastapi import FastAPI  # noqa: PLC0415
+    from fastapi.responses import HTMLResponse, JSONResponse  # noqa: PLC0415
+    from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
+    from jinja2 import Environment, FileSystemLoader  # noqa: PLC0415
+
+    from app.core.db import get_session, get_latest_articles, session_scope  # noqa: PLC0415
+    from app.models.article import Article  # noqa: PLC0415
+    from app.models.run import Run  # noqa: PLC0415
+    import app  # noqa: PLC0415
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI):  # noqa: ARG001
+        """Initialise DB on startup."""
+        from app.core.db import init_db  # noqa: PLC0415
+        init_db(db_url)
+        yield
+
+    web_app = FastAPI(
+        title="Crypto News Sentiment Monitor",
+        version=app.__version__,
+        lifespan=lifespan,
+    )
+
+    # Mount static files
+    static_dir = Path(__file__).parent / "static"
+    web_app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Jinja2 template environment
+    env = Environment(loader=FileSystemLoader(str(Path(__file__).parent / "templates")))
+
+    @web_app.get("/", response_class=HTMLResponse)
+    async def dashboard():
+        template = env.get_template("index.html")
+        html = template.render(version=app.__version__)
+        return HTMLResponse(content=html)
+
+    @web_app.get("/api/articles")
+    async def api_articles(limit: int = 100, source: str | None = None):
+        with session_scope() as session:
+            articles = get_latest_articles(session, limit=limit, source=source)
+
+        result = []
+        for a in articles:
+            result.append({
+                "id": getattr(a, "id", None),
+                "source": getattr(a, "source", ""),
+                "title": getattr(a, "title", ""),
+                "url": getattr(a, "url", ""),
+                "published_at": (
+                    a.published_at.isoformat() if a.published_at else None
+                ),
+                "sentiment_compound": getattr(a, "sentiment_compound", None),
+                "sentiment_label": getattr(a, "sentiment_label", None),
+                "sentiment_pos": getattr(a, "sentiment_pos", None),
+                "sentiment_neg": getattr(a, "sentiment_neg", None),
+                "sentiment_neu": getattr(a, "sentiment_neu", None),
+            })
+        return JSONResponse(content=result)
+
+    @web_app.get("/api/sentiment")
+    async def api_sentiment():
+        """Global and per-source sentiment aggregates."""
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        with session_scope() as session:
+            # Filter articles that have sentiment_compound set (not NULL)
+            stmt = _select(Article).where(getattr(Article, "sentiment_compound").is_not(None))
+            articles = list(session.execute(stmt).scalars().all())
+
+        # Global stats
+        compounds = [a.sentiment_compound for a in articles if a.sentiment_compound is not None]
+        global_mean = sum(compounds) / len(compounds) if compounds else None
+
+        # Per-source stats
+        source_map: dict[str, list[float]] = {}
+        for a in articles:
+            if a.sentiment_compound is None:
+                continue
+            source_map.setdefault(a.source, []).append(a.sentiment_compound)
+
+        sources = []
+        for name, vals in sorted(source_map.items()):
+            sources.append({
+                "source": name,
+                "count": len(vals),
+                "mean_compound": sum(vals) / len(vals),
+            })
+        sources.sort(key=lambda s: s["mean_compound"], reverse=True)
+
+        return JSONResponse(content={
+            "global_mean_compound": global_mean,
+            "total_articles": len(articles),
+            "sources": sources,
+        })
+
+    @web_app.get("/api/runs")
+    async def api_runs(limit: int = 10):
+        """Latest pipeline runs."""
+        from sqlalchemy import desc as _desc  # noqa: PLC0415
+
+        with session_scope() as session:
+            # Use table-level column to avoid pyright type confusion
+            stmt = _select(Run).order_by(_desc(getattr(Run, "started_at"))).limit(limit)
+            runs = list(session.execute(stmt).scalars().all())
+
+        result = []
+        for r in runs:
+            result.append({
+                "id": getattr(r, "id", None),
+                "started_at": (r.started_at.isoformat() if r.started_at else None),
+                "finished_at": (
+                    r.finished_at.isoformat() if r.finished_at else None
+                ),
+                "status": getattr(r, "status", ""),
+                "articles_fetched": getattr(r, "articles_fetched", 0),
+                "articles_new": getattr(r, "articles_new", 0),
+                "global_sentiment_score": getattr(r, "global_sentiment_score", None),
+                "global_sentiment_label": getattr(r, "global_sentiment_label", None),
+            })
+        return JSONResponse(content=result)
+
+    import uvicorn  # noqa: PLC0415
+    uvicorn.run(web_app, host=host, port=port)
+
+
 # ------------------------------------------------------------------ Logging ---
 
 def _setup_logging() -> None:
@@ -103,6 +239,12 @@ def _cli() -> None:
     # --- status --------------------------------------------------------
     subparsers.add_parser("status", help="Show last run statistics from the DB")
 
+    # --- web ---------------------------------------------------------
+    web_parser = subparsers.add_parser("web", help="Start the FastAPI dashboard server")
+    web_parser.add_argument("--host", type=str, default="0.0.0.0", help="Bind address")
+    web_parser.add_argument("--port", type=int, default=8000, help="Bind port")
+    web_parser.add_argument("--db-url", type=str, default=None, help="Database URL override")
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -152,6 +294,13 @@ def _cli() -> None:
             if run.error_message:
                 print(f"  Error:         {run.error_message}")
             print(f"{'='*60}\n")
+
+    elif args.command == "web":
+        _start_web_server(
+            host=args.host,
+            port=args.port,
+            db_url=args.db_url,
+        )
 
     else:
         # No subcommand — start the full app (scheduler mode).
