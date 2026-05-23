@@ -394,7 +394,7 @@
         async function loadDashboard() {
             try {
                 // Build query params based on crypto selection
-                let url = '/api/articles?limit=100';
+                let url = '/api/articles?limit=200';
                 if (selectedCrypto) {
                     url += '&topic=' + encodeURIComponent(selectedCrypto);
                 }

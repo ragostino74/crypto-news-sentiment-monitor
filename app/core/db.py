@@ -276,7 +276,7 @@ def get_latest_articles(
     """
     from app.models.article import Article  # noqa: PLC0415
 
-    stmt = select(Article).order_by(Article.scraped_at.desc()).limit(limit)
+    stmt = select(Article).order_by(Article.published_at.desc()).limit(limit)
 
     if source:
         stmt = stmt.where(Article.source == source)
@@ -327,7 +327,7 @@ def get_crypto_sentiment(
     stmt = (
         select(Article)
         .where(Article.topics.like(f"%{crypto_name}%"))
-        .order_by(Article.scraped_at.desc())
+        .order_by(Article.published_at.desc())
         .limit(limit)
     )
     articles = list(session.execute(stmt).scalars().all())

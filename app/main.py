@@ -78,7 +78,7 @@ def _start_web_server(
         return HTMLResponse(content=html)
 
     @web_app.get("/api/articles")
-    async def api_articles(limit: int = 100, source: str | None = None, topic: str | None = None):
+    async def api_articles(limit: int = 200, source: str | None = None, topic: str | None = None):
         with session_scope() as session:
             articles = get_latest_articles(session, limit=limit, source=source, topic=topic)
 

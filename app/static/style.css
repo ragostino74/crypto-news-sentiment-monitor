@@ -180,6 +180,7 @@ body {
 .articles-table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: fixed;
     font-size: 0.85rem;
 }
 .articles-table thead th {
@@ -216,15 +217,14 @@ body {
     overflow: hidden;
 }
 
-/* Source group header row */
+/* Source group header row — single full-width cell, children inline-block */
 .source-group-row {
     cursor: pointer;
 }
 .source-group-row:hover { background: #1f3040; }
 .source-group-cell {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    /* No flex — must be table-cell to span colspan=4 correctly */
+    white-space: nowrap;
     padding: 0.65rem 0.75rem !important;
     font-size: 0.82rem;
 }
