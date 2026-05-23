@@ -154,6 +154,7 @@ def _start_web_server(
     async def api_runs(limit: int = 10):
         """Latest pipeline runs."""
         from sqlalchemy import desc as _desc  # noqa: PLC0415
+        from sqlalchemy import select as _select  # noqa: PLC0415
 
         with session_scope() as session:
             stmt = _select(Run).order_by(_desc(getattr(Run, "started_at"))).limit(limit)
