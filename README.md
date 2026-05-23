@@ -1,12 +1,12 @@
 # crypto-news-sentiment-monitor
 
-Backend modulare per la raccolta e analisi di notizie crypto da 10 fonti RSS, con sentiment analysis a doppio motore (VADER + FinBERT).
+Backend modulare per la raccolta e analisi di notizie crypto da 13 fonti RSS, con sentiment analysis a doppio motore (VADER + FinBERT).
 
 ## Architettura
 
 | Modulo | Descrizione |
 |--------|-------------|
-| `sources` | Raccolta RSS da 10 fonti crypto con normalizzazione |
+|| `sources` | Raccolta RSS da 13 fonti crypto con normalizzazione e gestione redirect (The Defiant) ||
 | `services` | Pulizia, normalizzazione testuale e deduplica a due fasi (URL + content-hash) |
 | `database` | Persistenza SQLite via SQLAlchemy; tabelle `articles` e `runs` |
 | `sentiment` | **Doppio motore**: VADER (rule-based) + FinBERT (Transformer finetuned su testo finanziario). Ensemble ponderato 70/30 per analisi automatica. Endpoint `/api/compare-sentiment` per comparazione side-by-side |
@@ -15,9 +15,9 @@ Backend modulare per la raccolta e analisi di notizie crypto da 10 fonti RSS, co
 | `api` | Endpoint FastAPI: `/api/articles`, `/api/sentiment`, `/api/crypto-sentiment`, `/api/compare-sentiment`, `/api/runs`, `/api/crypto-topics` |
 | `dashboard` | Dashboard web con tabella articoli, card sentiment, grafici per-crypto, refresh auto 60s |
 
-## Fonti (10)
+## Fonti (13)
 
-CoinDesk · Cointelegraph · Decrypt · The Block · CryptoSlate · CoinJournal · AMBCrypto · Bitcoinist · CryptoPotato · BeInCrypto
+CoinDesk · Cointelegraph · Decrypt · CryptoSlate · CoinJournal · AMBCrypto · Bitcoinist · CryptoPotato · BeInCrypto · NewsBTC · CryptoNews · The Defiant · CoinCentral
 
 ## Criptovalute monitorate (55)
 
@@ -35,26 +35,13 @@ Bitcoin, Ethereum, BNB, XRP, Solana, Cardano, Dogecoin, Toncoin, TRON, Avalanche
 
 ### Docker (consigliato)
 
-Il progetto fornisce due immagini Docker:
-
 ```bash
-# --- Immagine BASE (VADER solo, ~400MB) ---
-docker compose build base
-docker compose up -d base
-
-# --- Immagine FINBERT (FinBERT + VADER, ~2.3GB) ---
-# Richiede ~2GB di spazio libero per il download del modello
-docker compose build finbert
-docker compose up -d finbert
+# Build e avvio
+docker compose build
+docker compose up -d
 ```
 
-L'immagine `finbert` scarica automaticamente il modello ProsusAI/finbert dal primo avvio e lo cache in `/root/.cache/huggingface`. Per persistere la cache tra i riavvi:
-
-```yaml
-# docker-compose.yml (già configurato)
-volumes:
-  - hf-cache:/root/.cache/huggingface
-```
+L'immagine scarica automaticamente il modello FinBERT dal primo avvio e lo cache in `/root/.cache/huggingface`. I volumi `sqlite-data` e `hf-cache` persistono tra i riavvii.
 
 ### Installazione locale
 
@@ -136,7 +123,7 @@ python -m app.main web            # solo dashboard + API (senza scheduler)
 app/
   core/         Database init, session management
   models/       SQLAlchemy ORM (Article, Run)
-  sources/      RSS fetchers: base, cryptonews, coindesk, cointelegraph, decrypt, theblock, cryptoslate, coinjournal, ambcrypto, bitcoinist, cryptopotato, beincrypto
+  sources/      RSS fetchers: base, coindesk, cointelegraph, decrypt, cryptoslate, coinjournal, ambcrypto, bitcoinist, cryptopotato, beincrypto, newsbtc, cryptonews, thedefiant, coincentral
   services/     Dedupe, topics detection, sentiment analysis (VADER + FinBERT + Ensemble)
   static/       CSS, JS dashboard
   templates/    Jinja2 HTML templates

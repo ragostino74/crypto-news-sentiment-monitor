@@ -1,6 +1,6 @@
 """Crypto news sources package.
 
-Provides a unified registry of source adapters (9 verified crypto RSS sources).
+Provides a unified registry of source adapters (13 verified crypto RSS sources).
 Each adapter inherits from SourceAdapter ABC and implements fetch_latest().
 """
 
@@ -14,9 +14,12 @@ from .ambcrypto import fetch_latest as fetch_ambcrypto_latest
 from .bitcoinist import fetch_latest as fetch_bitcoinist_latest
 from .cryptopotato import fetch_latest as fetch_cryptopotato_latest
 from .beincrypto import fetch_latest as fetch_beincrypto_latest
+from .newsbtc import fetch_latest as fetch_newsbtc_latest
+from .cryptonews import fetch_latest as fetch_cryptonews_latest
+from .thedefiant import fetch_latest as fetch_thedefiant_latest
+from .coincentral import fetch_latest as fetch_coincentral_latest
 
-# Registry of verified RSS source adapters.
-# Note: The Block and Bitcoin Magazine removed — no public RSS feeds available.
+# Registry of verified RSS source adapters (13 sources).
 SOURCES = {
     "coindesk": ("CoinDesk", fetch_coindesk_latest),
     "cointelegraph": ("Cointelegraph", fetch_cointelegraph_latest),
@@ -27,6 +30,10 @@ SOURCES = {
     "bitcoinist": ("Bitcoinist", fetch_bitcoinist_latest),
     "cryptopotato": ("CryptoPotato", fetch_cryptopotato_latest),
     "beincrypto": ("BeInCrypto", fetch_beincrypto_latest),
+    "newsbtc": ("NewsBTC", fetch_newsbtc_latest),
+    "cryptonews": ("CryptoNews", fetch_cryptonews_latest),
+    "thedefiant": ("The Defiant", fetch_thedefiant_latest),
+    "coincentral": ("CoinCentral", fetch_coincentral_latest),
 }
 
 __all__ = [
@@ -44,4 +51,8 @@ __all__ = [
     "fetch_bitcoinist_latest",
     "fetch_cryptopotato_latest",
     "fetch_beincrypto_latest",
+    "fetch_newsbtc_latest",
+    "fetch_cryptonews_latest",
+    "fetch_thedefiant_latest",
+    "fetch_coincentral_latest",
 ]

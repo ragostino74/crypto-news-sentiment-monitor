@@ -51,6 +51,7 @@ def _get_http_client() -> httpx.Client:
         _http_client = httpx.Client(
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT),
             headers={"User-Agent": _CUSTOM_USER_AGENT},
+            follow_redirects=True,  # follow RSS feed redirects (e.g. thedefiant.io 301)
         )
     return _http_client
 
@@ -65,9 +66,23 @@ def fetch_http(url: str, timeout: float | None = None) -> httpx.Response:
 
 
 def fetch_rss_feed(feed_url: str) -> feedparser.FeedParserDict:
-    """Fetch and parse an RSS/Atom feed. Returns a feedparser Feed object."""
+    """Fetch and parse an RSS/Atom feed. Returns a feedparser Feed object.
+
+    Uses httpx.Client which follows redirects by default (max 30). If the final
+    response is not 200 after redirects, returns an empty parsed feed.
+    """
     resp = fetch_http(feed_url)
     if resp.status_code != 200:
+        # Check if we followed any redirects (effective_url differs from request URL)
+        if resp.url != feed_url and resp.status_code == 301:
+            logger.warning(
+                "RSS %s returned HTTP 301 after redirect to %s — trying with final URL",
+                feed_url, str(resp.url),
+            )
+            # Retry directly with the final URL
+            resp2 = fetch_http(str(resp.url))
+            if resp2.status_code == 200:
+                return feedparser.parse(resp2.content)
         logger.warning("RSS %s returned HTTP %d", feed_url, resp.status_code)
         return feedparser.parse(b"")
     return feedparser.parse(resp.content)
