@@ -45,6 +45,28 @@ class SentimentResult:
     sentiment_engine: str = "vader"
 
 
+@dataclasses.dataclass(slots=True)
+class CompareResult:
+    """Side-by-side sentiment comparison between two engines."""
+
+    # VADER fields
+    vader_label: str
+    vader_compound: float
+    vader_pos: float
+    vader_neu: float
+    vader_neg: float
+
+    # FinBERT fields
+    finbert_label: str | None = None
+    finbert_compound: float | None = None
+    finbert_pos: float | None = None
+    finbert_neu: float | None = None
+    finbert_neg: float | None = None
+
+    # Composite text used
+    composite_text: str = ""
+
+
 # ------------------------------------------------------------------ Protocol ---
 
 
@@ -162,7 +184,7 @@ class FinBERTSentimentEngine:
                             "text-classification",
                             model=model,
                             tokenizer=tokenizer,
-                            return_all_scores=True,
+                            top_k=None,  # return all scores (replaces deprecated return_all_scores)
                             device=0,  # GPU if available; falls back to CPU
                         )
                         logger.info("FinBERT model loaded from %s", cls.MODEL_NAME)
@@ -262,9 +284,9 @@ class VaderSentimentEngine:
     """VADER-based sentiment analysis engine.
 
     Uses the compound score with standard thresholds:
-      - compound >= 0.05 → positive
-      - compound <= -0.05 → negative
-      - otherwise         → neutral
+      - compound >= 0.05 -> positive
+      - compound <= -0.05 -> negative
+      - otherwise         -> neutral
 
     Included as a fallback when FinBERT is not available or fails to load.
     """
@@ -389,6 +411,57 @@ class EnsembleSentimentEngine:
         if compound <= -0.1:
             return "negative"
         return "neutral"
+
+
+# ------------------------------------------------------------------ Compare engine ---
+
+
+def compare_sentiment(
+    title: str,
+    summary: str = "",
+    content: str = "",
+) -> CompareResult:
+    """Run both VADER and FinBERT on the same text for comparison.
+
+    Useful for debugging, testing model accuracy, or showing users
+    how each engine interprets the same headline differently.
+
+    Args:
+        title: Article headline (sentiment-rich).
+        summary: Article summary/description.
+        content: Full article body (excerpt used).
+
+    Returns:
+        ``CompareResult`` with both engines' outputs side by side.
+    """
+    # Build composite text (same logic as analyze_sentiment)
+    composite = build_sentiment_text(
+        title=title,
+        summary=summary,
+        content=content,
+    )
+
+    # Run VADER
+    vader_engine = VaderSentimentEngine()
+    vader_result = vader_engine.analyze(composite)
+
+    # Run FinBERT (if available)
+    finbert_engine = FinBERTSentimentEngine()
+    finbert_result = finbert_engine.analyze(composite)
+
+    return CompareResult(
+        vader_label=vader_result.sentiment_label,
+        vader_compound=vader_result.sentiment_compound,
+        vader_pos=vader_result.sentiment_pos,
+        vader_neu=vader_result.sentiment_neu,
+        vader_neg=vader_result.sentiment_neg,
+        finbert_label=finbert_result.sentiment_label,
+        finbert_compound=finbert_result.sentiment_compound,
+        finbert_pos=finbert_result.sentiment_pos,
+        finbert_neu=finbert_result.sentiment_neu,
+        finbert_neg=finbert_result.sentiment_neg,
+        composite_text=composite,
+    )
 
 
 # ------------------------------------------------------------------ Convenience functions ---

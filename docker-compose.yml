@@ -1,15 +1,25 @@
+version: "3.8"
+
 services:
-  crypto-news-sentiment-monitor:
-    build: .
+  crypto-news-sentiment:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-news-sentiment:finbert
     container_name: crypto-news-sentiment
     restart: unless-stopped
     ports:
       - "8000:8000"
-    volumes:
-      - sqlite-data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+    volumes:
+      # SQLite data persistence across rebuilds
+      - sqlite-data:/app/data
+      # HuggingFace model cache — FinBERT (~438MB) downloaded once, reused across builds
+      - hf-cache:/root/.cache/huggingface
 
 volumes:
   sqlite-data:
+    driver: local
+  hf-cache:
     driver: local

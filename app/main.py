@@ -24,8 +24,6 @@ import signal
 import sys
 from pathlib import Path
 
-# ------------------------------------------------------------------ Web server (FastAPI) ---
-
 
 def _start_web_server(
     host: str = "0.0.0.0",
@@ -33,12 +31,12 @@ def _start_web_server(
     db_url: str | None = None,
 ) -> None:
     """Start the FastAPI web server with dashboard and API endpoints."""
-    from contextlib import asynccontextmanager  # noqa: PLC0415
+    from contextlib import asynccontextmanager
 
-    from fastapi import FastAPI  # noqa: PLC0415
-    from fastapi.responses import HTMLResponse, JSONResponse  # noqa: PLC0415
-    from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
-    from jinja2 import Environment, FileSystemLoader  # noqa: PLC0415
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    from jinja2 import Environment, FileSystemLoader
 
     from app.core.db import (
         get_crypto_sentiment,
@@ -46,15 +44,16 @@ def _start_web_server(
         get_session,
         session_scope,
     )
-    from app.models.article import Article  # noqa: PLC0415
-    from app.models.run import Run  # noqa: PLC0415
-    from app.services.topics import get_crypto_list  # noqa: PLC0415
-    import app  # noqa: PLC0415
+    from app.models.article import Article
+    from app.models.run import Run
+    from app.services.topics import get_crypto_list
+    import app
 
     @asynccontextmanager
-    async def lifespan(app_instance: FastAPI):  # noqa: ARG001
+    async def lifespan(app_instance: FastAPI):
         """Initialise DB on startup."""
-        from app.core.db import init_db  # noqa: PLC0415
+        from app.core.db import init_db
+
         init_db(db_url)
         yield
 
@@ -111,17 +110,15 @@ def _start_web_server(
     @web_app.get("/api/sentiment")
     async def api_sentiment():
         """Global and per-source sentiment aggregates."""
-        from sqlalchemy import select as _select  # noqa: PLC0415
+        from sqlalchemy import select as _select
 
         with session_scope() as session:
-            # Filter articles that have sentiment_compound set (not NULL)
             stmt = _select(Article).where(getattr(Article, "sentiment_compound").is_not(None))
             articles = list(session.execute(stmt).scalars().all())
 
             compounds = [a.sentiment_compound for a in articles if a.sentiment_compound is not None]
             global_mean = sum(compounds) / len(compounds) if compounds else None
 
-            # Per-source stats
             source_map: dict[str, list[float]] = {}
             for a in articles:
                 if a.sentiment_compound is None:
@@ -150,11 +147,51 @@ def _start_web_server(
             data = get_crypto_sentiment(session, crypto, limit=100)
         return JSONResponse(content=data if data else {"error": "No articles found for this crypto"})
 
+    @web_app.get("/api/compare-sentiment")
+    async def api_compare_sentiment(
+        title: str,
+        summary: str = "",
+        content: str = "",
+    ):
+        """Compare VADER vs FinBERT sentiment on the same article text."""
+        from app.services.sentiment import compare_sentiment as _compare
+
+        comparison = _compare(title=title, summary=summary, content=content)
+        return JSONResponse(content={
+            "composite_text": comparison.composite_text[:200] + "...",
+            "vader": {
+                "label": comparison.vader_label,
+                "compound": round(comparison.vader_compound, 4),
+                "positive": round(comparison.vader_pos, 4),
+                "neutral": round(comparison.vader_neu, 4),
+                "negative": round(comparison.vader_neg, 4),
+            },
+            "finbert": {
+                "label": comparison.finbert_label,
+                "compound": (
+                    round(comparison.finbert_compound, 4)
+                    if comparison.finbert_compound is not None else None
+                ),
+                "positive": (
+                    round(comparison.finbert_pos, 4)
+                    if comparison.finbert_pos is not None else None
+                ),
+                "neutral": (
+                    round(comparison.finbert_neu, 4)
+                    if comparison.finbert_neu is not None else None
+                ),
+                "negative": (
+                    round(comparison.finbert_neg, 4)
+                    if comparison.finbert_neg is not None else None
+                ),
+            },
+        })
+
     @web_app.get("/api/runs")
     async def api_runs(limit: int = 10):
         """Latest pipeline runs."""
-        from sqlalchemy import desc as _desc  # noqa: PLC0415
-        from sqlalchemy import select as _select  # noqa: PLC0415
+        from sqlalchemy import desc as _desc
+        from sqlalchemy import select as _select
 
         with session_scope() as session:
             stmt = _select(Run).order_by(_desc(getattr(Run, "started_at"))).limit(limit)
@@ -177,11 +214,9 @@ def _start_web_server(
 
         return JSONResponse(content=result)
 
-    import uvicorn  # noqa: PLC0415
+    import uvicorn
     uvicorn.run(web_app, host=host, port=port)
 
-
-# ------------------------------------------------------------------ Logging ---
 
 def _setup_logging() -> None:
     """Configure root logger with human-readable format."""
@@ -199,8 +234,6 @@ def _setup_logging() -> None:
     )
 
 
-# ------------------------------------------------------------------ Bootstrap ---
-
 def bootstrap(interval_seconds: int = 300, db_url: str | None = None) -> None:
     """Start the full application (scheduler runs until interrupted).
 
@@ -211,7 +244,7 @@ def bootstrap(interval_seconds: int = 300, db_url: str | None = None) -> None:
     _setup_logging()
     logger = logging.getLogger(__name__)
 
-    from app.services.scheduler import get_scheduler  # noqa: PLC0415
+    from app.services.scheduler import get_scheduler
 
     scheduler = get_scheduler(interval_seconds=interval_seconds, db_url=db_url)
     scheduler.start()
@@ -233,15 +266,13 @@ def bootstrap(interval_seconds: int = 300, db_url: str | None = None) -> None:
     # Keep the main thread alive so the background timer can fire.
     try:
         while True:
-            import time  # noqa: PLC0415
+            import time
 
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("KeyboardInterrupt — stopping scheduler…")
         scheduler.stop()
 
-
-# ------------------------------------------------------------------ CLI ---
 
 def _cli() -> None:
     """Command-line interface for manual operations."""
@@ -250,17 +281,14 @@ def _cli() -> None:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    # --- run -----------------------------------------------------------
     run_parser = subparsers.add_parser("run", help="Trigger a single pipeline run")
     run_parser.add_argument(
         "--interval", type=int, default=300, help="Scheduler interval (unused for manual runs)"
     )
     run_parser.add_argument("--db-url", type=str, default=None, help="Database URL override")
 
-    # --- status --------------------------------------------------------
     subparsers.add_parser("status", help="Show last run statistics from the DB")
 
-    # --- web ---------------------------------------------------------
     web_parser = subparsers.add_parser("web", help="Start the FastAPI dashboard server")
     web_parser.add_argument("--host", type=str, default="0.0.0.0", help="Bind address")
     web_parser.add_argument("--port", type=int, default=8000, help="Bind port")
@@ -269,7 +297,7 @@ def _cli() -> None:
     args = parser.parse_args()
 
     if args.command == "run":
-        from app.services.scheduler import run_pipeline  # noqa: PLC0415
+        from app.services.scheduler import run_pipeline
 
         _setup_logging()
         result = run_pipeline()
@@ -290,8 +318,8 @@ def _cli() -> None:
         print(f"{'='*60}\n")
 
     elif args.command == "status":
-        from app.core.db import get_session, get_last_run  # noqa: PLC0415
-        from app.models.run import Run  # noqa: PLC0415
+        from app.core.db import get_session, get_last_run
+        from app.models.run import Run
 
         with get_session() as session:
             run = get_last_run(session)
@@ -324,7 +352,6 @@ def _cli() -> None:
         )
 
     else:
-        # No subcommand — start the full app (scheduler mode).
         bootstrap()
 
 
