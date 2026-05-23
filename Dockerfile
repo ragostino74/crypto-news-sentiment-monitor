@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install PyTorch CPU-only separately (requires special index URL)
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Only torch core needed — no vision/audio components for text sentiment analysis
+RUN pip install --no-cache-dir 'torch>=2.0,<3' --index-url https://download.pytorch.org/whl/cpu
 
 # Install the rest of the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
