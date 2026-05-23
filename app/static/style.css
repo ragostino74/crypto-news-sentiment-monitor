@@ -191,11 +191,91 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-.articles-table tbody td {
+
+/* Consistent row height for all data rows */
+.articles-table tbody td,
+.articles-table tbody th {
     padding: 0.65rem 0.75rem;
     border-bottom: 1px solid #1e2d3d;
     vertical-align: middle;
+    line-height: 1.4;
 }
+
+/* Force uniform row height — every row gets same visual size */
+.articles-table tbody tr {
+    height: 3rem !important;
+    min-height: 3rem !important;
+}
+.articles-table tbody td,
+.articles-table tbody th {
+    height: auto !important;
+    min-height: 2.4rem !important;
+    padding-top: 0.3rem !important;
+    padding-bottom: 0.3rem !important;
+    line-height: 1.4;
+    overflow: hidden;
+}
+
+/* Source group header row */
+.source-group-row {
+    cursor: pointer;
+}
+.source-group-row:hover { background: #1f3040; }
+.source-group-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 0.75rem !important;
+    font-size: 0.82rem;
+}
+
+/* Accordion toggle arrows */
+.source-toggle {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+    color: #6b8299;
+}
+.source-toggle.closed {
+    transform: rotate(-90deg);
+}
+
+/* Empty source row styling */
+.empty-source .source-group-cell {
+    opacity: 0.55;
+}
+
+/* Article rows inside source groups — direct tbody children, no nested table */
+tr.article-row td {
+    padding-left: 1.25rem !important;
+    border-bottom-color: #162430;
+}
+
+/* Subtle left border on article rows to visually tie them to their group header */
+tr.article-row td:first-child::before {
+    content: '';
+    display: inline-block;
+    width: 2px;
+    height: 1rem;
+    background: #253847;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+/* Source count badge in group header */
+.source-count {
+    font-size: 0.72rem;
+    margin-left: 0.25rem;
+}
+
+/* No articles message for empty sources */
+.no-articles-msg {
+    margin-left: 0.5rem;
+    font-size: 0.78rem;
+}
+
 .articles-table tbody tr:hover { background: #1f3040; }
 
 /* --- Badges --- */

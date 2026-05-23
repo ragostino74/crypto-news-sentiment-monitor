@@ -79,7 +79,15 @@
     <script>
         const AUTO_REFRESH_MS = 60000;
         let refreshTimer = null;
+        let countdownInterval = null;
         let selectedCrypto = '';
+
+        // Known sources list (mirrors app/sources/__init__.py SOURCES)
+        const KNOWN_SOURCES = [
+            'CoinDesk', 'Cointelegraph', 'Decrypt', 'The Block',
+            'CryptoSlate', 'CoinJournal', 'AMBCrypto', 'Bitcoinist',
+            'CryptoPotato', 'BeInCrypto'
+        ];
 
         function formatScore(score) {
             if (score === null || score === undefined) return '--';
@@ -102,6 +110,34 @@
                 hour: '2-digit', minute: '2-digit'
             });
         }
+
+        // ---- Countdown timer ----
+        function startCountdown() {
+            const timeEl = document.getElementById('last-update');
+            let remainingMs = AUTO_REFRESH_MS;
+
+            if (countdownInterval) clearInterval(countdownInterval);
+
+            countdownInterval = setInterval(() => {
+                remainingMs -= 1000;
+                if (remainingMs <= 0) {
+                    remainingMs = AUTO_REFRESH_MS;
+                }
+                const secs = Math.ceil(remainingMs / 1000);
+                const m = Math.floor(secs / 60);
+                const s = secs % 60;
+                timeEl.textContent = `Prossimo aggiornamento: ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        function stopCountdown() {
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+        }
+
+        // ---- Global sentiment ----
 
         function renderGlobalSentiment(data) {
             const scoreEl = document.getElementById('gauge-score');
@@ -130,62 +166,198 @@
             }
         }
 
+        // ---- Source sentiment bars (ALL known sources, sorted by article count desc) ----
+
         function renderSourceBars(data) {
             const container = document.getElementById('source-sentiment');
+
+            // Build a map from the returned data: source -> {mean_compound, count}
+            const dataMap = {};
+            for (const src of (data || [])) {
+                dataMap[src.source] = { mean_compound: src.mean_compound, count: src.count };
+            }
+
+            // If no data at all, show empty state
             if (!data || data.length === 0) {
                 container.innerHTML = '<p class="text-muted">Nessun dato disponibile.</p>';
                 return;
             }
 
             let html = '';
-            for (const src of data) {
-                const count = src.count || 0;
-                if (count === 0) continue;
 
-                const s = src.mean_compound ?? 0;
+            // Build combined list: sources with articles first (sorted by count desc), then empty ones
+            const allSourceInfo = [];
+            for (const name of KNOWN_SOURCES) {
+                const srcData = dataMap[name];
+                allSourceInfo.push({
+                    name: name,
+                    count: srcData ? srcData.count : 0,
+                    mean_compound: srcData ? (srcData.mean_compound ?? 0) : 0
+                });
+            }
+
+            // Sort: by count descending, then by mean_compound descending as tie-breaker
+            allSourceInfo.sort((a, b) => {
+                const countDiff = b.count - a.count;
+                if (countDiff !== 0) return countDiff;
+                return b.mean_compound - a.mean_compound;
+            });
+
+            for (const info of allSourceInfo) {
+                const s = info.mean_compound;
+                const count = info.count;
                 const barColor = s > 0.05 ? '#2ecc71' : s < -0.05 ? '#e74c3c' : '#95a5a6';
-                const barWidth = Math.min(Math.abs(s) * 500, 100);
+                const barWidth = count > 0 ? Math.min(Math.abs(s) * 500, 100) : 0;
 
                 html += `
                     <div class="source-bar-row">
-                        <span class="source-name">${src.source}</span>
+                        <span class="source-name">${info.name}</span>
                         <div class="source-bar-track">
                             <div class="source-bar-fill" style="width: ${barWidth}%; background: ${barColor};"></div>
                         </div>
-                        <span class="source-meta">${formatScore(s)} · ${count} art.</span>
+                        <span class="source-meta">${count > 0 ? formatScore(s) : '--'} · ${count} art.</span>
                     </div>`;
             }
             container.innerHTML = html;
+        }
+
+        // ---- Articles grouped by source (accordion, all closed initially) ----
+
+        function groupArticlesBySource(articles) {
+            const groups = {};
+            for (const a of articles) {
+                const src = a.source || 'Sconosciuta';
+                if (!groups[src]) groups[src] = [];
+                groups[src].push(a);
+            }
+            return groups;
         }
 
         function renderArticles(articles) {
             const tbody = document.getElementById('articles-body');
             document.getElementById('article-count').textContent = articles.length + ' articoli';
 
-            if (articles.length === 0) {
+            if (!articles || articles.length === 0) {
                 tbody.innerHTML = '<tr class="loading-row"><td colspan="4" class="text-center">Nessun articolo trovato.</td></tr>';
                 return;
             }
 
+            const groups = groupArticlesBySource(articles);
+
+            // Sort sources by article count descending
+            const sortedEntries = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+
             let html = '';
-            for (const a of articles) {
-                const badgeClass = getSentimentBadgeClass(a.sentiment_compound);
-                const sentimentIcon = a.sentiment_label === 'positive' ? '&#x1F60A;' :
-                                      a.sentiment_label === 'negative' ? '&#x1F625;' :
-                                      a.sentiment_label === 'neutral' ? '&#x1F914;' : '?';
 
-                const title = (a.title || '').replace(/</g, '&lt;').substring(0, 100);
-                const link = a.url ? `<a href="${a.url.replace(/"/g, '&quot;')}" target="_blank" rel="noopener">${title}&#x2197;</a>` : title;
-
-                html += `
-                    <tr>
-                        <td><span class="badge ${badgeClass}">${sentimentIcon} ${formatScore(a.sentiment_compound)}</span></td>
-                        <td>${a.source}</td>
-                        <td>${link}</td>
-                        <td>${formatDate(a.published_at)}</td>
-                    </tr>`;
+            // Sources with articles (sorted by count desc)
+            for (const [sourceName, items] of sortedEntries) {
+                html += renderSourceGroupRow(sourceName, items.length);
+                // Each article as a direct <tr> in the main tbody (no nested table!)
+                for (const a of items) {
+                    html += renderArticleRow(a, sourceName);
+                }
             }
+
+            // Empty sources at bottom (all have count 0, sorted by name for consistency)
+            const shownSources = Object.keys(groups);
+            const emptySources = KNOWN_SOURCES.filter(name => !shownSources.includes(name)).sort();
+            for (const name of emptySources) {
+                html += renderEmptySourceRow(name);
+            }
+
             tbody.innerHTML = html;
+
+            // Collapse ALL groups initially — even the first one
+            collapseAllGroups();
+        }
+
+        function renderSourceGroupRow(sourceName, count) {
+            return `
+                <tr class="source-group-row" data-source="${escapeAttr(sourceName)}" onclick="toggleSource('${escapeAttr(sourceName)}')" style="cursor:pointer">
+                    <td colspan="4" class="source-group-cell">
+                        <span class="source-toggle">&#x25B6;</span>
+                        <strong>${sourceName}</strong>
+                        <span class="badge badge-neutral source-count">${count} art.</span>
+                    </td>
+                </tr>`;
+        }
+
+        function renderEmptySourceRow(sourceName) {
+            return `
+                <tr class="source-group-row empty-source" data-source="${escapeAttr(sourceName)}" onclick="toggleSource('${escapeAttr(sourceName)}')" style="cursor:pointer">
+                    <td colspan="4" class="source-group-cell">
+                        <span class="source-toggle">&#x25B6;</span>
+                        <strong>${sourceName}</strong>
+                        <span class="badge badge-neutral source-count">0 art.</span>
+                        <em class="text-muted no-articles-msg">(nessuna notizia)</em>
+                    </td>
+                </tr>`;
+        }
+
+        function renderArticleRow(article, sourceName) {
+            const badgeClass = getSentimentBadgeClass(article.sentiment_compound);
+            const sentimentIcon = article.sentiment_label === 'positive' ? '&#x1F60A;' :
+                                  article.sentiment_label === 'negative' ? '&#x1F625;' :
+                                  article.sentiment_label === 'neutral' ? '&#x1F914;' : '?';
+
+            const title = (article.title || '').replace(/</g, '&lt;').substring(0, 100);
+            const link = article.url ? `<a href="${article.url.replace(/"/g, '&quot;')}" target="_blank" rel="noopener">${title}&#x2197;</a>` : title;
+
+            return `
+                <tr class="article-row" data-source="${escapeAttr(sourceName)}">
+                    <td><span class="badge ${badgeClass}">${sentimentIcon} ${formatScore(article.sentiment_compound)}</span></td>
+                    <td>${sourceName}</td>
+                    <td>${link}</td>
+                    <td>${formatDate(article.published_at)}</td>
+                </tr>`;
+        }
+
+        function escapeAttr(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
+        function toggleSource(sourceName) {
+            const groupRow = document.querySelector(`tr.source-group-row[data-source="${escapeAttr(sourceName)}"]`);
+            const toggle = groupRow ? groupRow.querySelector('.source-toggle') : null;
+            if (!groupRow || !toggle) return;
+
+            const isClosed = toggle.classList.contains('closed');
+
+            // Toggle this source's articles
+            const rows = document.querySelectorAll(`tr.article-row[data-source="${escapeAttr(sourceName)}"]`);
+            for (const row of rows) {
+                row.style.display = isClosed ? '' : 'none';
+            }
+
+            if (isClosed) {
+                toggle.textContent = '\u25BC';
+                toggle.classList.remove('closed');
+            } else {
+                toggle.textContent = '\u25B6';
+                toggle.classList.add('closed');
+            }
+        }
+
+        function collapseAllGroups() {
+            // Hide all article rows and set toggle to closed arrow for ALL groups
+            const groupRows = document.querySelectorAll('.source-group-row');
+            for (const gr of groupRows) {
+                const sourceName = gr.getAttribute('data-source');
+                if (!sourceName) continue;
+
+                // Hide associated article rows
+                const rows = document.querySelectorAll(`tr.article-row[data-source="${escapeAttr(sourceName)}"]`);
+                for (const row of rows) {
+                    row.style.display = 'none';
+                }
+
+                // Set toggle to closed state
+                const toggle = gr.querySelector('.source-toggle');
+                if (toggle) {
+                    toggle.textContent = '\u25B6';
+                    toggle.classList.add('closed');
+                }
+            }
         }
 
         // --- Crypto selector logic ---
@@ -220,9 +392,6 @@
         }
 
         async function loadDashboard() {
-            const timeEl = document.getElementById('last-update');
-            timeEl.textContent = 'Aggiornamento...';
-
             try {
                 // Build query params based on crypto selection
                 let url = '/api/articles?limit=100';
@@ -259,7 +428,7 @@
                     source: source,
                     count: vals.length,
                     mean_compound: vals.reduce((a, b) => a + b, 0) / vals.length
-                })).sort((a, b) => b.mean_compound - a.mean_compound);
+                })).sort((a, b) => b.count - a.count || b.mean_compound - a.mean_compound);
 
                 const activeSources = Object.keys(sourceMap).length;
 
@@ -270,10 +439,11 @@
                 document.getElementById('total-articles').textContent = articlesData ? articlesData.length : '--';
                 document.getElementById('active-sources').textContent = activeSources || '--';
 
-                timeEl.textContent = 'Aggiornato: ' + new Date().toLocaleTimeString('it-IT');
+                // Restart countdown timer
+                startCountdown();
             } catch (err) {
                 console.error('Errore caricamento dashboard:', err);
-                timeEl.textContent = 'Errore aggiornamento';
+                stopCountdown();
             }
         }
 
@@ -287,6 +457,7 @@
         document.getElementById('refresh-btn').addEventListener('click', () => {
             clearInterval(refreshTimer);
             refreshTimer = setInterval(loadDashboard, AUTO_REFRESH_MS);
+            startCountdown();
         });
     </script>
 </body>
