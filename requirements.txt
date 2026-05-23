@@ -7,6 +7,9 @@ newspaper3k>=0.2.8,<0.3
 # NLP / Sentiment
 textblob>=0.18,<0.19
 vaderSentiment>=3.3,<4
+transformers>=4.35,<5
+sentencepiece>=0.2,<1
+accelerate>=0.25,<1
 
 # Web / Dashboard (v0.6.0)
 fastapi>=0.115,<1
