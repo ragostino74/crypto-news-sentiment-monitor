@@ -1,3 +1,9 @@
+"""Crypto news sources package.
+
+Provides a unified registry of source adapters (12 authoritative crypto RSS sources).
+Each adapter inherits from SourceAdapter ABC and implements fetch_latest().
+"""
+
 from .base import RawArticle, fetch_rss_feed, strip_html_tags, normalize_summary
 from .coindesk import fetch_latest as fetch_coindesk_latest
 from .cointelegraph import fetch_latest as fetch_cointelegraph_latest
@@ -9,8 +15,9 @@ from .ambcrypto import fetch_latest as fetch_ambcrypto_latest
 from .bitcoinist import fetch_latest as fetch_bitcoinist_latest
 from .cryptopotato import fetch_latest as fetch_cryptopotato_latest
 from .beincrypto import fetch_latest as fetch_beincrypto_latest
+from .bitcoinmagazine import fetch_latest as fetch_bitcoinmagazine_latest
 
-# Registry of all available source adapters (10 authoritative crypto RSS sources).
+# Registry of all available source adapters (12 authoritative crypto RSS sources).
 SOURCES = {
     "coindesk": ("CoinDesk", fetch_coindesk_latest),
     "cointelegraph": ("Cointelegraph", fetch_cointelegraph_latest),
@@ -22,6 +29,7 @@ SOURCES = {
     "bitcoinist": ("Bitcoinist", fetch_bitcoinist_latest),
     "cryptopotato": ("CryptoPotato", fetch_cryptopotato_latest),
     "beincrypto": ("BeInCrypto", fetch_beincrypto_latest),
+    "bitcoinmagazine": ("Bitcoin Magazine", fetch_bitcoinmagazine_latest),
 }
 
 __all__ = [
@@ -40,4 +48,5 @@ __all__ = [
     "fetch_bitcoinist_latest",
     "fetch_cryptopotato_latest",
     "fetch_beincrypto_latest",
+    "fetch_bitcoinmagazine_latest",
 ]

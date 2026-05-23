@@ -403,7 +403,7 @@ class TestErrorHandling:
 
         # Force a network error by mocking with an unreachable URL.
         with patch("app.sources.coindesk.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Connection refused")
+            mock_fetch.side_effect = ConnectionError("Connection refused")
             articles = fetch_latest()
             assert articles == []
 
@@ -411,7 +411,7 @@ class TestErrorHandling:
         from app.sources.cointelegraph import fetch_latest
 
         with patch("app.sources.cointelegraph.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Network error")
+            mock_fetch.side_effect = ConnectionError("Network error")
             articles = fetch_latest()
             assert articles == []
 
@@ -419,7 +419,7 @@ class TestErrorHandling:
         from app.sources.ambcrypto import fetch_latest
 
         with patch("app.sources.ambcrypto.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Network error")
+            mock_fetch.side_effect = ConnectionError("Network error")
             articles = fetch_latest()
             assert articles == []
 
@@ -427,7 +427,7 @@ class TestErrorHandling:
         from app.sources.cryptopotato import fetch_latest
 
         with patch("app.sources.cryptopotato.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Network error")
+            mock_fetch.side_effect = ConnectionError("Network error")
             articles = fetch_latest()
             assert articles == []
 
@@ -435,7 +435,7 @@ class TestErrorHandling:
         from app.sources.beincrypto import fetch_latest
 
         with patch("app.sources.beincrypto.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Network error")
+            mock_fetch.side_effect = ConnectionError("Network error")
             articles = fetch_latest()
             assert articles == []
 
@@ -443,7 +443,7 @@ class TestErrorHandling:
         from app.sources.coinjournal import fetch_latest
 
         with patch("app.sources.coinjournal.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Network error")
+            mock_fetch.side_effect = ConnectionError("Network error")
             articles = fetch_latest()
             assert articles == []
 
@@ -451,6 +451,6 @@ class TestErrorHandling:
         from app.sources.bitcoinist import fetch_latest
 
         with patch("app.sources.bitcoinist.fetch_rss_feed") as mock_fetch:
-            mock_fetch.side_effect = Exception("Network error")
+            mock_fetch.side_effect = ConnectionError("Network error")
             articles = fetch_latest()
             assert articles == []

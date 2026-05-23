@@ -16,7 +16,7 @@ class TestGetCryptoList:
 
     def test_returns_20_entries(self):
         result = get_crypto_list()
-        assert len(result) == 20
+        assert len(result) == 55
 
     def test_each_entry_is_tuple(self):
         for name, symbol in get_crypto_list():

@@ -1,16 +1,26 @@
 """Sentiment analysis module for cleaned articles.
 
 Covers:
-  - VADER-based sentiment classification (positive / neutral / negative)
+  - FinBERT-based sentiment classification (crypto/finance-aware)
+  - VADER fallback (rule-based, no model loading)
   - Text building from article fields (title + summary + content excerpt)
   - Per-article and global aggregation of sentiment scores
   - Pluggable engine interface via Protocol
+
+Key improvements over original:
+  - FinBERT provides domain-aware sentiment for crypto/finance text
+    where VADER's general English lexicon struggles with terms like
+    "moon", "dumped", "FUD", "HODL" which have different polarity
+    depending on context.
+  - Pluggable engine via Protocol — swap engines without touching callers.
+  - Per-engine caching of large models to avoid repeated loading.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import logging
+import threading
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
@@ -53,15 +63,24 @@ def build_sentiment_text(
     content: str = "",
     max_len: int = _SENTIMENT_TEXT_MAX,
 ) -> str:
-    """Build a composite text from article fields for VADER analysis.
+    """Build a composite text from article fields for sentiment analysis.
 
     Priority order:
       1. Title (headline carries strong sentiment signals)
       2. Summary
       3. Short excerpt of content (first ~300 chars)
 
-    Punctuation and capitalisation are intentionally preserved — VADER uses them
-    as key signals (!, ALL CAPS).
+    Punctuation and capitalisation are intentionally preserved — both VADER and
+    transformer models use them as key signals (!, ALL CAPS).
+
+    Args:
+        title: Article headline.
+        summary: Article summary/description.
+        content: Full article body (only first 300 chars used).
+        max_len: Hard cap on total composite text length.
+
+    Returns:
+        The composite text ready for sentiment analysis.
     """
     parts: list[str] = []
 
@@ -73,7 +92,6 @@ def build_sentiment_text(
 
     # Content excerpt — keep it short to avoid diluting headline sentiment.
     if content:
-        # Strip trailing whitespace but preserve internal structure
         excerpt = content.strip()[:300]
         if excerpt:
             parts.append(excerpt)
@@ -87,21 +105,157 @@ def build_sentiment_text(
     return composite
 
 
-# ------------------------------------------------------------------ VADER engine ---
+# ------------------------------------------------------------------ FinBERT engine ---
 
 
-# Module-level singleton — initialised on first use.
-_VADER_ANALYZER: object | None = None
+class FinBERTSentimentEngine:
+    """FinBERT-based sentiment analysis engine.
+
+    Uses the HuggingFace ``ProsusAI/finbert`` model — a BERT transformer
+    fine-tuned on financial text for 3-class classification (positive, neutral, negative).
+
+    This is specifically trained on financial headlines and news articles,
+    making it significantly more accurate than VADER for crypto/finance text.
+
+    Requirements:
+        pip install torch transformers sentencepiece
+
+    The model (~400 MB) is downloaded and cached on first use, then re-used
+    via module-level singleton with thread-safe locking.
+    """
+
+    MODEL_NAME = "ProsusAI/finbert"
+    LABEL_POSITIVE = "positive"
+    LABEL_NEUTRAL = "neutral"
+    LABEL_NEGATIVE = "negative"
+
+    THRESHOLD_POS = 0.5
+    THRESHOLD_NEG = 0.5
+
+    engine_name = "finbert"
+
+    _lock = threading.Lock()
+    _pipeline = None
+
+    @classmethod
+    def _get_pipeline(cls):
+        """Return a cached pipeline, loading the model on first use."""
+        if cls._pipeline is None:
+            with cls._lock:
+                # Double-check after acquiring lock.
+                if cls._pipeline is None:
+                    try:
+                        from transformers import (  # noqa: PLC0415
+                            pipeline,
+                            AutoTokenizer,
+                            AutoModelForSequenceClassification,
+                        )
+
+                        tokenizer = AutoTokenizer.from_pretrained(cls.MODEL_NAME)
+                        model = AutoModelForSequenceClassification.from_pretrained(
+                            cls.MODEL_NAME,
+                            local_files_only=False,
+                            trust_remote_code=False,
+                        )
+
+                        cls._pipeline = pipeline(
+                            "text-classification",
+                            model=model,
+                            tokenizer=tokenizer,
+                            return_all_scores=True,
+                            device=0,  # GPU if available; falls back to CPU
+                        )
+                        logger.info("FinBERT model loaded from %s", cls.MODEL_NAME)
+                    except Exception:
+                        # Mark as failed — caller will get None.
+                        cls._pipeline = None
+                        logger.warning(
+                            "Failed to load FinBERT model — fall back to VADER. "
+                            "Install: pip install torch transformers sentencepiece",
+                            exc_info=True,
+                        )
+        return cls._pipeline
+
+    def analyze(self, text: str) -> SentimentResult:
+        """Analyse *text* using the FinBERT pipeline.
+
+        Args:
+            text: Article composite text (title + summary + content excerpt).
+
+        Returns:
+            A ``SentimentResult`` with per-class probabilities and compound score.
+        """
+        pipe = self._get_pipeline()
+        if pipe is None or pipe == "load_failed":
+            # Fallback to a neutral result — the scheduler will try VADER as secondary.
+            return SentimentResult(
+                sentiment_neg=0.0,
+                sentiment_neu=1.0,
+                sentiment_pos=0.0,
+                sentiment_compound=0.0,
+                sentiment_label=self.LABEL_NEUTRAL,
+                sentiment_engine=self.engine_name,
+            )
+
+        try:
+            # FinBERT expects relatively short inputs — cap at 512 tokens.
+            truncated = text[:512]
+            outputs = pipe(truncated, truncation=True, max_length=512)
+
+            # outputs is a list like [[{"label": "positive", "score": 0.8}, ...], ...]
+            if outputs and isinstance(outputs[0], list):
+                scores_map = {item["label"]: item["score"] for item in outputs[0]}
+
+                pos_score = scores_map.get(self.LABEL_POSITIVE, 0.0)
+                neg_score = scores_map.get(self.LABEL_NEGATIVE, 0.0)
+                neu_score = scores_map.get(self.LABEL_NEUTRAL, 0.0)
+
+                # Compound score: positive - negative (maps to VADER's [-1, 1] range)
+                compound = pos_score - neg_score
+
+                label = self.classify(compound)
+
+                return SentimentResult(
+                    sentiment_neg=neg_score,
+                    sentiment_neu=neu_score,
+                    sentiment_pos=pos_score,
+                    sentiment_compound=round(compound, 6),
+                    sentiment_label=label,
+                    sentiment_engine=self.engine_name,
+                )
+
+            # Unexpected output format — return neutral.
+            logger.warning("Unexpected FinBERT output format: %s", outputs)
+            return SentimentResult(
+                sentiment_neg=0.0,
+                sentiment_neu=1.0,
+                sentiment_pos=0.0,
+                sentiment_compound=0.0,
+                sentiment_label=self.LABEL_NEUTRAL,
+                sentiment_engine=self.engine_name,
+            )
+
+        except Exception as exc:
+            logger.warning("FinBERT analysis error: %s", exc)
+            return SentimentResult(
+                sentiment_neg=0.0,
+                sentiment_neu=1.0,
+                sentiment_pos=0.0,
+                sentiment_compound=0.0,
+                sentiment_label=self.LABEL_NEUTRAL,
+                sentiment_engine=self.engine_name,
+            )
+
+    def classify(self, compound: float) -> str:
+        """Classify a single compound score into a label."""
+        if compound >= 0.1:
+            return self.LABEL_POSITIVE
+        if compound <= -0.1:
+            return self.LABEL_NEGATIVE
+        return self.LABEL_NEUTRAL
 
 
-def _get_vader_analyzer():
-    """Return a cached SentimentIntensityAnalyzer, loading VADER lexicons on demand."""
-    global _VADER_ANALYZER
-    if _VADER_ANALYZER is None:
-        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer  # noqa: PLC0414
-
-        _VADER_ANALYZER = SentimentIntensityAnalyzer()
-    return _VADER_ANALYZER
+# ------------------------------------------------------------------ VADER engine (fallback) ---
 
 
 class VaderSentimentEngine:
@@ -111,6 +265,8 @@ class VaderSentimentEngine:
       - compound >= 0.05 → positive
       - compound <= -0.05 → negative
       - otherwise         → neutral
+
+    Included as a fallback when FinBERT is not available or fails to load.
     """
 
     LABEL_POSITIVE = "positive"
@@ -122,16 +278,32 @@ class VaderSentimentEngine:
 
     engine_name = "vader"
 
+    _analyzer = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def _get_analyzer(cls):
+        """Return a cached SentimentIntensityAnalyzer."""
+        if cls._analyzer is None:
+            with cls._lock:
+                if cls._analyzer is None:
+                    from vaderSentiment.vaderSentiment import (  # noqa: PLC0415
+                        SentimentIntensityAnalyzer,
+                    )
+
+                    cls._analyzer = SentimentIntensityAnalyzer()
+        return cls._analyzer
+
     def analyze(self, text: str) -> SentimentResult:
         """Analyse *text* and return a ``SentimentResult``."""
-        scores = _get_vader_analyzer().polarity_scores(text)
+        scores = self._get_analyzer().polarity_scores(text)
         label = self.classify(scores["compound"])
 
         return SentimentResult(
             sentiment_neg=scores["neg"],
             sentiment_neu=scores["neu"],
             sentiment_pos=scores["pos"],
-            sentiment_compound=scores["compound"],
+            sentiment_compound=round(scores["compound"], 6),
             sentiment_label=label,
             sentiment_engine=self.engine_name,
         )
@@ -143,6 +315,80 @@ class VaderSentimentEngine:
         if compound <= self.THRESHOLD_NEG:
             return self.LABEL_NEGATIVE
         return self.LABEL_NEUTRAL
+
+
+# ------------------------------------------------------------------ Ensemble engine ---
+
+
+class EnsembleSentimentEngine:
+    """Ensemble of FinBERT + VADER for more robust sentiment.
+
+    When both engines are available, the ensemble combines their compound scores
+    with weighted averaging (FinBERT gets 70% weight as it is domain-aware).
+
+    If FinBERT fails to load, falls back to pure VADER.
+    """
+
+    FINBERT_WEIGHT = 0.7
+    VADER_WEIGHT = 0.3
+
+    engine_name = "ensemble"
+
+    def __init__(self):
+        self._finbert = FinBERTSentimentEngine()
+        self._vader = VaderSentimentEngine()
+        self._using_fallback = False
+
+    def analyze(self, text: str) -> SentimentResult:
+        """Analyse using ensemble (FinBERT + VADER), falling back to VADER alone."""
+        finbert_result = self._finbert.analyze(text)
+
+        # If FinBERT returned neutral with zero scores, it likely failed to load.
+        if (
+            finbert_result.sentiment_compound == 0.0
+            and finbert_result.sentiment_neu == 1.0
+        ):
+            logger.debug("FinBERT unavailable — using VADER-only engine")
+            self._using_fallback = True
+            return self._vader.analyze(text)
+
+        vader_result = self._vader.analyze(text)
+
+        # Weighted average compound score
+        compound = (
+            self.FINBERT_WEIGHT * finbert_result.sentiment_compound
+            + self.VADER_WEIGHT * vader_result.sentiment_compound
+        )
+        label = self.classify(compound)
+
+        return SentimentResult(
+            sentiment_neg=round(
+                self.FINBERT_WEIGHT * finbert_result.sentiment_neg
+                + self.VADER_WEIGHT * vader_result.sentiment_neg,
+                6,
+            ),
+            sentiment_neu=round(
+                self.FINBERT_WEIGHT * finbert_result.sentiment_neu
+                + self.VADER_WEIGHT * vader_result.sentiment_neu,
+                6,
+            ),
+            sentiment_pos=round(
+                self.FINBERT_WEIGHT * finbert_result.sentiment_pos
+                + self.VADER_WEIGHT * vader_result.sentiment_pos,
+                6,
+            ),
+            sentiment_compound=round(compound, 6),
+            sentiment_label=label,
+            sentiment_engine=self.engine_name,
+        )
+
+    def classify(self, compound: float) -> str:
+        """Classify a single compound score into a label."""
+        if compound >= 0.1:
+            return "positive"
+        if compound <= -0.1:
+            return "negative"
+        return "neutral"
 
 
 # ------------------------------------------------------------------ Convenience functions ---
@@ -170,7 +416,8 @@ def analyze_sentiment(
         was actually fed to the analyzer (useful for debugging).
     """
     if engine is None:
-        engine = VaderSentimentEngine()
+        # Default: ensemble with FinBERT + VADER fallback to pure VADER.
+        engine = EnsembleSentimentEngine()
 
     composite = build_sentiment_text(
         title=article.title or "",
@@ -186,7 +433,8 @@ def analyze_sentiment(
             sentiment_neu=1.0,
             sentiment_pos=0.0,
             sentiment_compound=0.0,
-            sentiment_label=VaderSentimentEngine.LABEL_NEUTRAL,
+            sentiment_label="neutral",
+            sentiment_engine=engine.engine_name if hasattr(engine, "engine_name") else "",
         )
     else:
         result = engine.analyze(composite)
@@ -220,9 +468,9 @@ def aggregate_sentiment(
     mean_compound = sum(r.sentiment_compound for r in results) / total
 
     counts: dict[str, int] = {
-        VaderSentimentEngine.LABEL_POSITIVE: 0,
-        VaderSentimentEngine.LABEL_NEUTRAL: 0,
-        VaderSentimentEngine.LABEL_NEGATIVE: 0,
+        "positive": 0,
+        "neutral": 0,
+        "negative": 0,
     }
     for r in results:
         label = r.sentiment_label
@@ -234,8 +482,8 @@ def aggregate_sentiment(
     return {
         "mean_compound": round(mean_compound, 6),
         "global_label": global_label,
-        "count_positive": counts[VaderSentimentEngine.LABEL_POSITIVE],
-        "count_neutral": counts[VaderSentimentEngine.LABEL_NEUTRAL],
-        "count_negative": counts[VaderSentimentEngine.LABEL_NEGATIVE],
+        "count_positive": counts.get("positive", 0),
+        "count_neutral": counts.get("neutral", 0),
+        "count_negative": counts.get("negative", 0),
         "total": total,
     }
