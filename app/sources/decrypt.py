@@ -41,7 +41,7 @@ class DecryptAdapter(SourceAdapter):
         feed = None
         for url in [_METADATA.rss_url] + _METADATA.fallback_urls:
             try:
-                feed = retry_with_backoff(fetch_rss_feed, config=retry_cfg, url=url)
+                feed = retry_with_backoff(fetch_rss_feed, config=retry_cfg, feed_url=url)
                 if feed and "entries" in feed:
                     break
             except Exception as exc:
